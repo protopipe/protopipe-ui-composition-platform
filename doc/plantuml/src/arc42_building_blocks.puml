@@ -1,0 +1,29 @@
+@startuml
+skinparam componentStyle rectangle
+
+package "Protopipe Frontend Platform" {
+  [Page Resource] as Page
+  [Experiment Resource] as Exp
+  [Operator] as Op
+  [Composer] as Comp
+  [RFA Registry] as Reg
+  [Storybook Hub] as SB
+  [CDCT Pipeline] as CDCT
+  [Overwatch] as OW
+}
+
+package "Teams" {
+  [Fragment/RFA Owner Team] as Team
+  [Backend Owner Team] as BETeam
+}
+
+Team --> SB : develop components\n(Atomic Design)
+Team --> CDCT : publish contracts\n& verified mocks
+CDCT --> Reg : publish RFA\nsnapshots/releases
+Op --> Page : resolves effective config\n-> status
+Op --> Exp : reconcile experiment specs
+Comp --> Reg : fetch RFAs/templates
+Comp --> OW : traces/events/metrics
+BETeam --> CDCT : backend contracts\n(optional)
+@enduml
+

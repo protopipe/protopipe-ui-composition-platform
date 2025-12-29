@@ -1,0 +1,38 @@
+name: Render PlantUML Diagrams
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "docs/plantuml/src/*.puml"
+      - ".github/workflows/render-plantuml.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Render PlantUML diagrams via Docker
+        run: |
+          docker run --rm \
+            -w /work \
+            -v "$PWD:/work" \
+            plantuml/plantuml \
+            -tsvg \
+            -o ../out \
+            doc/plantuml/src/*.puml
+
+      - name: Commit rendered diagrams
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(docs): render PlantUML diagrams"
+          file_pattern: "doc/plantuml/out/*.svg"
+

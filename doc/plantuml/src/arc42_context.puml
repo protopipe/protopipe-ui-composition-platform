@@ -1,0 +1,29 @@
+@startuml
+skinparam componentStyle rectangle
+
+actor User
+actor "Management / PM" as PM
+rectangle "Protopipe Cockpit\n(Experiments, KPIs, Governance)" as Cockpit
+rectangle "GitLab CI/CD\n(Feature Branch Builds,\nSnapshots)" as GitLab
+
+node "Kubernetes Cluster" {
+  rectangle "Protopipe Operator\n(CRD -> Runtime Config)" as Operator
+  rectangle "Protopipe FE Composer\n(Page SSR + Composition)" as Composer
+  rectangle "Message Bridge\n(/messages polling)" as Bridge
+  rectangle "Overwatch\n(OTel Collector + Event Archive)" as Overwatch
+
+  rectangle "Backend Services\n(Domain APIs)" as BE
+  database "Shared Session/State Store\n(clustered)" as Store
+}
+
+User --> Composer : HTTP(S)\nPage Request
+Composer --> BE : parallel calls\n(GET/forwardBody optional)
+Composer --> Bridge : poll /messages\n(optional client)
+Composer --> Overwatch : traces/events/metrics
+Composer --> Store : session/state lookup\n(optional)
+PM --> Cockpit : define/toggle experiments\nview KPIs
+Cockpit --> Operator : create/update Experiment CRD
+GitLab --> Operator : publish snapshots\n(artifact registry)
+Operator --> Composer : resolved routing/config\n(status/effective)
+@enduml
+

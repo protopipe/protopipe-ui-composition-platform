@@ -1,0 +1,25 @@
+@startuml
+skinparam componentStyle rectangle
+left to right direction
+
+rectangle "Dev" as Dev
+rectangle "GitLab MR\n(Feature Branch)" as MR
+rectangle "CI Pipeline\n(build/test/cdct/storybook)" as CI
+rectangle "Artifact Registry\n(Snapshot digests)" as AR
+rectangle "Experiment CRD\n(treatment refs)" as EXP
+rectangle "Composer\n(prod routing)" as COMP
+rectangle "Cockpit\n(KPI/Exposure)" as COCK
+rectangle "Merge\n(DoD complete)" as MERGE
+rectangle "GC\n(retention/ttl)" as GC
+
+Dev -> MR : push commits
+MR -> CI : pipeline trigger
+CI -> AR : publish snapshot\n(immutable digest)
+COCK -> EXP : define/update experiment\n(pinned user optional)
+EXP -> COMP : effective routing
+COMP -> COCK : exposure + KPIs
+COCK -> MERGE : decision: promote/merge
+MERGE -> CI : release pipeline
+AR -> GC : delete unreferenced\nsnapshots after TTL
+@enduml
+

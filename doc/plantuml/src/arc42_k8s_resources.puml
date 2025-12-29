@@ -1,0 +1,25 @@
+@startuml
+skinparam componentStyle rectangle
+
+package "Kubernetes API" {
+  [Page CRD\nspec: templateRef, slots, backends\nstatus: effectiveExperiments,\nresolvedDigests, conditions] as PageCRD
+  [Experiment CRD\nspec: assignment, targeting,\noverrides(artifact refs), KPI refs\nstatus: resolved, pinned digests] as ExpCRD
+}
+
+package "Controllers" {
+  [Protopipe Operator] as Op
+}
+
+package "Runtime" {
+  [Composer Deployment] as Comp
+  [RFA Registry\n(Artifact storage)] as Reg
+  [Overwatch\n(OTel + Event Archive)] as OW
+}
+
+Op --> PageCRD : reconcile\nupdate status/conditions
+Op --> ExpCRD : reconcile\npin digests in status
+Comp --> Reg : fetch templates/RFAs\nby resolved digest
+Comp --> OW : telemetry/events
+
+@enduml
+

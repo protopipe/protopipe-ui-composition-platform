@@ -1,0 +1,34 @@
+site_name: Protopipe Frontend Platform
+docs_dir: doc
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - toc.integrate
+
+nav:
+  - Home: README.md
+  - arc42:
+      - Overview: arc42/README.md
+      - 01 Introduction: arc42/01-introduction.md
+      - 02 Constraints: arc42/02-constraints.md
+      - 03 Context: arc42/03-context.md
+      - 04 Solution Strategy: arc42/04-solution-strategy.md
+      - 05 Building Blocks: arc42/05-building-blocks.md
+      - 06 Runtime View: arc42/06-runtime-view.md
+      - 07 Deployment View: arc42/07-deployment-view.md
+      - 08 Cross-cutting Concepts: arc42/08-cross-cutting-concepts.md
+      - 09 Architecture Decisions: arc42/09-architecture-decisions.md
+      - 10 Quality Requirements: arc42/10-quality-requirements.md
+      - 11 Risks: arc42/11-risks-and-technical-debt.md
+  - ADRs:
+      - Index: adr/README.md
+      - ADR-0001: adr/0001-record-architecture-decisions.md
+      - ADR-0002: adr/0002-model-pages-and-experiments-as-kubernetes-crds.md
+      - ADR-0003: adr/0003-introduce-render-function-artifacts-as-the-rendering-boundary.md
+      - ADR-0004: adr/0004-use-artifact-based-experiments-instead-of-feature-toggles-in-product-code.md
+      - ADR-0005: adr/0005-keep-metrics-in-prometheus-avoid-counters-in-crd-status.md
+      - ADR-0006: adr/0006-adopt-docs-as-code-with-arc42-chapters-and-plantuml-diagrams.md
+      - ADR-0007: adr/0007-establish-adr-governance-and-lifecycle.md
+

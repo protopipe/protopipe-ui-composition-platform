@@ -1,0 +1,29 @@
+@startuml
+autonumber
+actor User
+participant "Composer" as C
+participant "Experiment\nResolver" as ER
+participant "Template Store\n(Registry)" as TS
+participant "RFA Invoker" as RFA
+participant "Backends" as BE
+participant "Cache" as Cache
+participant "Overwatch\n(OTel/Event)" as OW
+
+User -> C : GET /page
+C -> ER : resolve assignment\n(user/session/cookie)
+ER --> C : experiment group\n+ effective overrides
+C -> TS : fetch Template@digest
+TS --> C : template markup\n+ slot map
+C -> Cache : lookup cached fragments\n(etag/ttl/deps)
+Cache --> C : hit/miss + cached chunks
+
+par Parallel fragment/data resolution
+  C -> BE : call backends\n(parallel)
+  C -> RFA : invoke RFA\n(render(data)->html)
+end
+
+C -> Cache : store fragments\n(etag/ttl optional)
+C -> OW : emit exposure event\n+ trace spans\n+ metrics
+C --> User : SSR HTML response\n(streaming optional)
+@enduml
+
