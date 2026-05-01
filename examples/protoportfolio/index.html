@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Protoportfolio Dashboard Mockup</title>
+  <script type="text/javascript" src="https://unpkg.com/vis-network@9.1.2/dist/vis-network.min.js"></script>
+  <link href="https://unpkg.com/vis-network@9.1.2/styles/vis-network.min.css" rel="stylesheet" type="text/css" />
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #1e1e1e;
+      color: #ffffff;
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .dashboard-header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .top-section {
+      display: flex;
+      flex-direction: row;
+      justify-content: space-between;
+      gap: 20px;
+      width: 100%;
+      max-width: 1200px;
+    }
+    .quadrants {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 20px;
+      flex: 1;
+    }
+    .quadrant {
+      background-color: #2c2c2c;
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+      cursor: pointer;
+      transition: transform 0.2s;
+      position: relative;
+    }
+    .quadrant:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 12px rgba(0, 0, 0, 0.3);
+    }
+    .golden-circle, .kpi-tree {
+      background-color: #2c2c2c;
+      padding: 15px;
+      border-radius: 8px;
+      flex: 1;
+      max-width: 500px;
+    }
+    .title {
+      font-size: 16px;
+      color: #cccccc;
+    }
+    .value {
+      font-size: 32px;
+      font-weight: bold;
+      color: #de083d;
+      text-align: center;
+      margin-top: 5px;
+    }
+    .trend {
+      font-size: 14px;
+      color: #888;
+      text-align: center;
+    }
+    .strategies {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      width: 100%;
+      max-width: 1200px;
+      margin-top: 30px;
+    }
+    .strategy, .hypothesis {
+      background-color: #2c2c2c;
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+    }
+    .feature-steps {
+      font-size: 12px;
+      color: #bbb;
+    }
+    .kpi-indicator {
+      display: inline-block;
+      margin-right: 5px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background-color: #444;
+      font-size: 12px;
+    }
+    .status-green { color: #50c878; }
+    .status-yellow { color: #f1c232; }
+    .status-red { color: #e06666; }
+    #strategy-network {
+      width: 100%;
+      height: 400px;
+      max-width: 1200px;
+      margin-top: 40px;
+      background-color: #2c2c2c;
+      border-radius: 8px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+    }
+  </style>
+</head>
+<body>
+  <div class="dashboard-header">
+    <h1>Protoportfolio Dashboard</h1>
+    <p>Strategic and Operational Transparency</p>
+  </div>
+  <div class="top-section">
+    <div class="quadrants">
+      <div class="quadrant" onclick="showKPITree('Market')">
+        <div class="title">Market</div>
+        <div class="value">35%</div>
+        <div class="trend">+5%</div>
+      </div>
+      <div class="quadrant" onclick="showKPITree('Technology')">
+        <div class="title">Technology</div>
+        <div class="value">12%</div>
+        <div class="trend">-2%</div>
+      </div>
+      <div class="quadrant" onclick="showKPITree('Internal')">
+        <div class="title">Internal Capabilities</div>
+        <div class="value">78%</div>
+        <div class="trend">±0%</div>
+      </div>
+      <div class="quadrant" onclick="showKPITree('Business')">
+        <div class="title">Business Model</div>
+        <div class="value">22%</div>
+        <div class="trend">+3%</div>
+      </div>
+    </div>
+    <div id="goldenCircle" class="golden-circle">
+      <h3>Golden Circle</h3>
+      <p><strong>Why:</strong> We reduce waste caused by missing feedback loops.</p>
+      <p><strong>How:</strong> Unified platform with instant feedback, visual and cross-team.</p>
+      <p><strong>What:</strong> A dashboard from problem → hypothesis → execution → insight – in one sprint.</p>
+    </div>
+  </div>
+  <div class="strategies">
+    <div class="strategy">
+      <div class="title">Strategy: Improve Customer Experience</div>
+      <div class="hypothesis">
+        <div class="title">Hypothesis: New Checkout Flow</div>
+        <div>
+          <span class="kpi-indicator status-green">Market +3%</span>
+          <span class="kpi-indicator status-yellow">Business ±0%</span>
+        </div>
+        <div class="feature-steps">Steps completed: 3/5</div>
+      </div>
+    </div>
+    <div class="strategy">
+      <div class="title">Strategy: Tech Modernization</div>
+      <div class="hypothesis">
+        <div class="title">Hypothesis: Reduce Tech Debt</div>
+        <div>
+          <span class="kpi-indicator status-red">Technology -2%</span>
+        </div>
+        <div class="feature-steps">Steps completed: 6/10</div>
+      </div>
+    </div>
+  </div>
+  <div id="strategy-network"></div>
+  <script>
+    const kpiData = {
+      "Market": {
+        root: "Market Share",
+        sub: [
+          {name:"New Customer Acquisition",status:"green"},
+          {name:"Churn Rate",status:"yellow"},
+          {name:"Brand Awareness",status:"green"},
+          {name:"Customer Satisfaction",status:"red"},
+          {name:"Competitive Positioning",status:"green"}
+        ]
+      },
+      "Technology": {
+        root: "Tech Debt Ratio",
+        sub: [
+          {name:"Code Quality",status:"yellow"},
+          {name:"System Downtime",status:"red"},
+          {name:"Deployment Frequency",status:"green"},
+          {name:"Incident Response Time",status:"yellow"}
+        ]
+      },
+      "Internal": {
+        root: "Employee Engagement",
+        sub: [
+          {name:"Employee Turnover",status:"yellow"},
+          {name:"Training Completion",status:"green"},
+          {name:"Internal Promotions",status:"green"},
+          {name:"Absenteeism",status:"red"},
+          {name:"Employee Satisfaction",status:"green"},
+          {name:"Leadership Index",status:"yellow"}
+        ]
+      },
+      "Business": {
+        root: "Revenue Growth",
+        sub: [
+          {name:"Quarterly Earnings",status:"green"},
+          {name:"Profit Margin",status:"yellow"},
+          {name:"Cost Efficiency",status:"green"}
+        ]
+      }
+    };
+    function showKPITree(quadrant) {
+      const golden = document.getElementById('goldenCircle');
+      const data = kpiData[quadrant];
+      let content = `<h3>${quadrant} KPI Tree</h3><strong>${data.root}</strong>`;
+      data.sub.forEach(sub => {
+        content += `<div class="kpi-indicator status-${sub.status}">${sub.name}</div>`;
+      });
+      golden.innerHTML = content;
+    }
+    // Backend-Mock-Daten
+    const backendGraphData = {
+      nodes: [
+        { id: 's1', label: 'Improve CX', type: 'strategy' },
+        { id: 'h1', label: 'New Checkout Flow', type: 'hypothesis' },
+        { id: 's2', label: 'Tech Modernization', type: 'strategy' },
+        { id: 'h2', label: 'Faster Deployment', type: 'hypothesis' },
+        { id: 'h3', label: 'Reduce Support Tickets', type: 'hypothesis' }
+      ],
+      edges: [
+        { from: 's1', to: 'h3', effect: 'positive' },
+        { from: 's2', to: 'h2', effect: 'positive' },
+        { from: 'h2', to: 's1', effect: 'negative' }
+      ]
+    };
+    const nodes = new vis.DataSet(
+      backendGraphData.nodes.map(n => ({
+        id: n.id,
+        label: n.label,
+        font: { size: n.type === 'strategy' ? 22 : 14 },
+        mass: n.type === 'strategy' ? 8 : 2,
+        color: '#de083d',
+        shape: 'box'
+      }))
+    );
+    const edges = new vis.DataSet(
+      backendGraphData.edges.map(e => ({
+        from: e.from,
+        to: e.to,
+        arrows: 'to',
+        color: { color: e.effect === 'positive' ? 'green' : 'red' }
+      }))
+    );
+    const container = document.getElementById('strategy-network');
+    const data = { nodes, edges };
+    const options = {
+      nodes: {
+        font: { color: '#ffffff' },
+        chosen: false
+      },
+      edges: {
+        smooth: true,
+        arrows: { to: { enabled: true } },
+        font: { color: '#ffffff', align: 'middle' }
+      },
+      layout: {
+        improvedLayout: true
+      },
+      physics: {
+        stabilization: true,
+        repulsion: {
+          nodeDistance: 150,
+          centralGravity: 0.2,
+          springLength: 200,
+          springConstant: 0.05
+        }
+      }
+    };
+    new vis.Network(container, data, options);
+  </script>
+</body>
+</html>
