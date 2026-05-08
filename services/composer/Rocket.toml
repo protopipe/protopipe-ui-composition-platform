@@ -1,0 +1,12 @@
+[default]
+address = "0.0.0.0"
+port = 8080
+log_level = "normal"
+
+[default.limits]
+forms = "32 kB"
+json = "1 MiB"
+
+[admin]
+address = "0.0.0.0"
+port = 9000

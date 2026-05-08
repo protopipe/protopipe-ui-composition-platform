@@ -1,0 +1,22 @@
+{
+  "mappings": [
+    {
+      "request": {
+        "method": "GET",
+        "url": "/api/products"
+      },
+      "response": {
+        "status": 200,
+        "jsonBody": {
+          "products": [
+            {
+              "id": "1",
+              "name": "Test Product",
+              "price": 29.99
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
