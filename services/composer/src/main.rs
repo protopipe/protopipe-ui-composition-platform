@@ -1,4 +1,4 @@
-use actix_web::{web, App, HttpServer};
+use actix_web::{web, App};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -6,6 +6,28 @@ use std::sync::Mutex;
 mod admin;
 mod render;
 
+/// A static data value, deserialized as-is from configuration.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StaticData {
+    pub value: serde_json::Value,
+}
+
+/// A dynamic REST-backed data value. Implemented later.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DynamicRestData {
+    pub endpoint: String,
+    pub default: serde_json::Value,
+}
+
+/// A typed data value for page config.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum DataValue {
+    Static(StaticData),
+    DynamicRest(DynamicRestData),
+}
+
+/// Page configuration with structured data values.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PageConfig {
     pub path: String,
@@ -13,13 +35,13 @@ pub struct PageConfig {
     pub template: String,
     pub rfa: String,
     pub timeout_ms: u64,
-    pub defaults: serde_json::Value,
+    pub data: HashMap<String, DataValue>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RFAConfig {
     pub id: String,
-    pub source: String, // später: URL/Path/Inline
+    pub source: String,
     pub version: String,
 }
 

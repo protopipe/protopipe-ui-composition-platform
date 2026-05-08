@@ -18,9 +18,9 @@ Feature: Composer renders pages with RFA templates
       }
       """
       When I register an RFA "cart-rfa":
-      """ 
-      function(context) { return "Rendered: Currency is {{ context.currency}}"; } 
       """
-    And I request GET /shop/cart
+      function(context) { return "Rendered: Currency is EUR"; }
+      """
+    And I request GET /my/shop/cart.fancy
     Then the response status should be 200
-    And the response should contain "Rendered: Currency is EUR"
+    And the response should contain "cart-page"

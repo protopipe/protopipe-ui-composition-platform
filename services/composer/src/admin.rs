@@ -1,6 +1,9 @@
-use crate::{AppState, PageConfig, RFAConfig};
+use crate::{AppState, DataValue, PageConfig, RFAConfig};
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+pub type PageDataDto = HashMap<String, DataValue>;
 
 #[derive(Serialize, Deserialize)]
 pub struct PageConfigDto {
@@ -9,7 +12,7 @@ pub struct PageConfigDto {
     pub template: String,
     pub rfa: String,
     pub timeout_ms: u64,
-    pub defaults: serde_json::Value,
+    pub data: PageDataDto,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -33,7 +36,12 @@ pub async fn register_page(
         template: config.template.clone(),
         rfa: config.rfa.clone(),
         timeout_ms: config.timeout_ms,
-        defaults: config.defaults.clone(),
+        data: config
+            .data
+            .clone()
+            .into_iter()
+            .map(|(key, value)| (key, value.into()))
+            .collect(),
     };
 
     let mut pages = state.pages.lock().unwrap();
