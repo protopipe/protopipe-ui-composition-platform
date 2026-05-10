@@ -1,0 +1,73 @@
+name: Composer k6 benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths:
+      - 'services/composer/**'
+      - '.github/workflows/composer-k6-benchmark.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  composer-benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Install k6
+        run: |
+          K6_VERSION=$(curl -s https://api.github.com/repos/grafana/k6/releases/latest | grep '"tag_name"' | head -1 | cut -d '"' -f 4)
+          curl -L -o /tmp/k6.tar.gz https://github.com/grafana/k6/releases/download/${K6_VERSION}/k6-${K6_VERSION}-linux-amd64.tar.gz
+          tar -xzf /tmp/k6.tar.gz -C /tmp
+          sudo mv /tmp/k6-${K6_VERSION}-linux-amd64/k6 /usr/local/bin/k6
+          k6 version
+
+      - name: Build Composer service
+        working-directory: services/composer
+        run: cargo build --release
+
+      - name: Run Composer service and k6 benchmark
+        working-directory: services/composer
+        run: |
+          set -euo pipefail
+          cargo run --release --bin composer > composer-benchmark.log 2>&1 &
+          SERVICE_PID=$!
+          trap 'echo "Stopping Composer"; kill "$SERVICE_PID" || true' EXIT
+
+          for i in $(seq 1 20); do
+            if curl -fs http://127.0.0.1:9000/admin/health >/dev/null 2>&1; then
+              echo "Composer service is ready"
+              break
+            fi
+            sleep 1
+          done
+
+          if ! curl -fs http://127.0.0.1:9000/admin/health >/dev/null 2>&1; then
+            echo "Composer did not start in time"
+            cat composer-benchmark.log
+            exit 1
+          fi
+
+          k6 run --summary-export=bench/k6-summary.json --out json=bench/k6-results.json bench/k6/benchmark.js
+
+      - name: Upload k6 benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: composer-k6-results
+          path: |
+            services/composer/bench/k6-summary.json
+            services/composer/bench/k6-results.json
+            services/composer/composer-benchmark.log

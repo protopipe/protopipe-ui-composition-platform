@@ -53,6 +53,20 @@ curl http://localhost:8080/shop/cart
 - **Admin Port (9000)**: `/admin/config/pages`, `/admin/rfa/register`, `/admin/health`
 - **Render Port (8080)**: Dynamic page rendering (catch-all)
 
+## Benchmarking
+
+A k6 benchmark is available under `services/composer/bench/k6/benchmark.js`.
+The GitHub Actions workflow is defined in `.github/workflows/composer-k6-benchmark.yml`.
+You can test Github Actions with the Github-Extension act:
+```
+ gh extension install https://github.com/nektos/gh-act
+```
+and run via:
+```
+ gh act workflow_dispatch -j composer-benchmark
+```
+
+
 ## Architecture Components
 
 - `admin.rs`: Admin endpoint handlers (async/await)

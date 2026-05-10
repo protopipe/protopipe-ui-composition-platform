@@ -1,63 +1,33 @@
 use actix_web::{web, App};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
 mod admin;
 mod contextloader;
+mod page;
 mod render;
 
-/// A static data value, deserialized as-is from configuration.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct StaticData {
-    pub value: serde_json::Value,
-}
-
-/// A dynamic REST-backed data value. Implemented later.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DynamicRestData {
-    pub endpoint: String,
-    pub default: serde_json::Value,
-}
-
-/// A typed data value for page config.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "kebab-case")]
-pub enum DataValue {
-    Static(StaticData),
-    DynamicRest(DynamicRestData),
-}
-
-/// Page configuration with structured data values.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PageConfig {
-    pub path: String,
-    pub page_id: String,
-    pub template: String,
-    pub rfa: String,
-    pub timeout_ms: u64,
-    pub data: HashMap<String, DataValue>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RFAConfig {
-    pub id: String,
-    pub source: String,
-    pub version: String,
-}
+pub use page::{DataValue, PageConfig, RFAConfig};
 
 pub struct AppState {
     pub pages: Mutex<HashMap<String, PageConfig>>,
     pub rfas: Mutex<HashMap<String, RFAConfig>>,
+    pub render_pool: render::RenderPool,
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     env_logger::init();
 
+    let worker_count = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+
+    let render_pool = render::RenderPool::new(worker_count);
     let state = web::Data::new(AppState {
         pages: Mutex::new(HashMap::new()),
         rfas: Mutex::new(HashMap::new()),
+        render_pool,
     });
 
     log::info!("Starting Composer Service");
@@ -72,8 +42,8 @@ async fn main() -> std::io::Result<()> {
             .service(
                 web::scope("/admin")
                     .route("/health", web::get().to(admin::health))
-                    .route("/config/pages", web::post().to(admin::register_page))
-                    .route("/rfa/register", web::post().to(admin::register_rfa))
+                    .route("/config/pages", web::post().to(page::register_page))
+                    .route("/rfa/register", web::post().to(page::register_rfa))
             )
     })
     .bind("0.0.0.0:9000")?
