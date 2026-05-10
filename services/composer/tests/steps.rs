@@ -31,6 +31,8 @@ async fn register_page_config(world: &mut ComposerWorld, step: &GherkinStep) {
         .docstring()
         .expect("Expected docstring for page config");
 
+    println!("Injected page config script:\n{}", docstring);
+
     let payload: serde_json::Value = serde_json::from_str(docstring)
         .expect("Invalid JSON in page config docstring");
 
@@ -71,6 +73,8 @@ async fn register_rfa(world: &mut ComposerWorld, id: String, step: &GherkinStep)
     let docstring = step
         .docstring()
         .expect("Expected docstring for RFA source");
+
+    println!("Injected RFA script for '{}':\n{}", id, docstring);
 
     let payload = serde_json::json!({
         "id": id,
