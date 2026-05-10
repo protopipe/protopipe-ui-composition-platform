@@ -1,21 +1,6 @@
-use crate::{AppState, DataValue, StaticData};
+use crate::{contextloader, AppState};
 use actix_web::{web, HttpRequest, HttpResponse};
 use deno_core::{error::AnyError, JsRuntime, RuntimeOptions, serde_v8, v8};
-use std::collections::HashMap;
-
-fn build_context(data: &HashMap<String, DataValue>) -> serde_json::Value {
-    let mut context = serde_json::Map::new();
-
-    for (key, value) in data {
-        let item = match value {
-            DataValue::Static(StaticData { value }) => value.clone(),
-            DataValue::DynamicRest(dynamic) => dynamic.default.clone(),
-        };
-        context.insert(key.clone(), item);
-    }
-
-    serde_json::Value::Object(context)
-}
 
 fn execute_rfa(source: &str, context: &serde_json::Value) -> Result<String, AnyError> {
     let mut runtime = JsRuntime::new(RuntimeOptions::default());
@@ -65,7 +50,7 @@ pub async fn render_page(
                 }
             };
 
-            let context = build_context(&page_config.data);
+            let context = contextloader::build_context(&page_config.data);
             let rendered = match execute_rfa(&rfa.source, &context) {
                 Ok(output) => output,
                 Err(err) => {

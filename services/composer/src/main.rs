@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 mod admin;
+mod contextloader;
 mod render;
 
 /// A static data value, deserialized as-is from configuration.
