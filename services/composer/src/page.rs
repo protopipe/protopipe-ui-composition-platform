@@ -92,6 +92,23 @@ pub async fn register_page(
     HttpResponse::Created().json(config.into_inner())
 }
 
+pub async fn get_pages(state: web::Data<AppState>) -> HttpResponse {
+    let pages = state.pages.lock().unwrap();
+    let page_list: Vec<PageConfigDto> = pages
+        .values()
+        .map(|config| PageConfigDto {
+            path: config.path.clone(),
+            page_id: config.page_id.clone(),
+            template: config.template.clone(),
+            rfa: config.rfa.clone(),
+            timeout_ms: config.timeout_ms,
+            data: config.data.clone().into_iter().collect(),
+        })
+        .collect();
+
+    HttpResponse::Ok().json(page_list)
+}
+
 pub async fn register_rfa(
     state: web::Data<AppState>,
     config: web::Json<RFAConfigDto>,

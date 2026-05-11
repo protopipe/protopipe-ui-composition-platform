@@ -6,12 +6,11 @@ use serde_json::Value;
 use tokio::sync::oneshot;
 
 pub struct RenderPool {
-    sender: Sender<RenderRequest>,
-    worker_count: usize,
+    render_sender: Sender<RenderRequest>,
+    admin_senders: Vec<Sender<AdminCommand>>,
 }
 
 pub enum RenderRequest {
-    RegisterRfa(page::RFAConfig),
     Render {
         rfa_id: String,
         context_json: String,
@@ -19,29 +18,37 @@ pub enum RenderRequest {
     },
 }
 
+pub enum AdminCommand {
+    RegisterRfa(page::RFAConfig),
+}
+
 impl RenderPool {
     pub fn new(worker_count: usize) -> Self {
         let count = worker_count.max(1);
-        let (sender, receiver) = unbounded();
+        let (render_sender, render_receiver) = unbounded();
+        let mut admin_senders = Vec::with_capacity(count);
 
         for _ in 0..count {
-            spawn_worker(receiver.clone());
+            let (admin_sender, admin_receiver) = unbounded();
+            admin_senders.push(admin_sender);
+            spawn_worker(admin_receiver, render_receiver.clone());
         }
 
         Self {
-            sender,
-            worker_count: count,
+            render_sender,
+            admin_senders: admin_senders,
         }
     }
 
     pub async fn register_rfa(&self, rfa: &crate::RFAConfig) -> Result<(), AnyError> {
         let rfa = rfa.clone();
 
-        for _ in 0..self.worker_count {
-            self.sender
-                .send(RenderRequest::RegisterRfa(rfa.clone()))
-                .map_err(|_| AnyError::msg("render worker queue closed"))?;
+        for sender in &self.admin_senders {
+            sender
+                .send(AdminCommand::RegisterRfa(rfa.clone()))
+                .map_err(|_| AnyError::msg("admin command queue closed"))?;
         }
+        
         Ok(())
     }
 
@@ -53,7 +60,7 @@ impl RenderPool {
             response: tx,
         };
 
-        self.sender
+        self.render_sender
             .send(request)
             .map_err(|_| AnyError::msg("render worker queue closed"))?;
 
@@ -78,27 +85,36 @@ impl Worker {
         Self { runtime }
     }
 
-    fn run(mut self, receiver: Receiver<RenderRequest>) {
-        while let Ok(request) = receiver.recv() {
-            match request {
-                RenderRequest::RegisterRfa(rfa) => {
-                    let registration = format!(
-                        "globalThis.rfaRegistry[{}] = {};",
-                        serde_json::to_string(&rfa.id).unwrap(),
-                        rfa.source
-                    );
-                    let _ = self.runtime.execute_script(
-                        "<rfa-register>",
-                        deno_core::FastString::from(registration),
-                    );
+    fn run(mut self, admin_cmd_receiver: Receiver<AdminCommand>, render_receiver: Receiver<RenderRequest>) {
+
+        loop {
+            while let Ok(cmd) = admin_cmd_receiver.try_recv() {
+                match cmd {
+                    AdminCommand::RegisterRfa(rfa) => {
+                        let registration = format!(
+                            "globalThis.rfaRegistry[{}] = {};",
+                            serde_json::to_string(&rfa.id).unwrap(),
+                            rfa.source
+                        );
+                        let _ = self.runtime.execute_script(
+                            "<rfa-register>",
+                            deno_core::FastString::from(registration),
+                        );
+                    }
                 }
-                RenderRequest::Render {
-                    rfa_id,
-                    context_json,
-                    response,
-                } => {
-                    let result = self.execute_render(&rfa_id, &context_json);
-                    let _ = response.send(result);
+            }
+
+            let render_cmd = render_receiver.try_recv();
+            match render_cmd {
+                Ok(RenderRequest::Render { rfa_id, context_json, response }) => {
+                    self.execute_render(&rfa_id, &context_json)
+                        .map_err(|e| log::error!("Render error: {}", e))
+                        .ok()
+                        .and_then(|output| response.send(Ok(output)).ok());
+                }
+                Err(_) => {
+                    // TODO expose metrics about idle time and sleep for a bit to avoid busy waiting
+                    std::thread::sleep(std::time::Duration::from_millis(10));
                 }
             }
         }
@@ -106,12 +122,13 @@ impl Worker {
 
     fn execute_render(&mut self, rfa_id: &str, context_json: &str) -> Result<String, AnyError> {
         let script = format!(
-            r#"const render = globalThis.rfaRegistry[{rfa_id}];
-if (typeof render !== 'function') throw new Error('RFA not registered: {rfa_id}');
-const context = JSON.parse({context_json:?});
-const output = render(context);
-if (typeof output === 'string') output;
-else JSON.stringify(output);
+            r#"
+(function() {{
+    const render = globalThis.rfaRegistry[{rfa_id}];
+    const context = JSON.parse({context_json:?});
+    const output = render(context);
+    return typeof output === 'string' ? output : JSON.stringify(output);
+}})()
 "#,
             rfa_id = serde_json::to_string(rfa_id)?,
             context_json = context_json
@@ -125,9 +142,9 @@ else JSON.stringify(output);
     }
 }
 
-fn spawn_worker(receiver: Receiver<RenderRequest>) {
+fn spawn_worker(admin_rx: Receiver<AdminCommand>, render_rx: Receiver<RenderRequest>) {
     std::thread::spawn(move || {
-        Worker::new().run(receiver);
+        Worker::new().run(admin_rx, render_rx);
     });
 }
 

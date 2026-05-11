@@ -4,17 +4,18 @@ import { check, sleep } from 'k6';
 export const options = {
   vus: __ENV.K6_VUS ? parseInt(__ENV.K6_VUS) : 5,
   duration: __ENV.K6_DURATION ? __ENV.K6_DURATION : '15s',
+  host: __ENV.K6_HOST ? __ENV.K6_HOST : '127.0.0.1',
 };
 
-const adminBase = 'http://127.0.0.1:9000';
-const renderBase = 'http://127.0.0.1:8080';
+const adminBase = 'http://'+ options.host +':9000';
+const renderBase = 'http://'+ options.host +':8080';
 const rfaId = 'bench-rfa';
 const pagePath = '/bench-page';
 
 export function setup() {
   const rfaPayload = {
     id: rfaId,
-    source: 'function render(context) { return `hello ${context.name}`; }',
+    source: 'function(context) { return `hello ${context.name}`; }',
     version: '1',
   };
 

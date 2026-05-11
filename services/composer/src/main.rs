@@ -43,6 +43,7 @@ async fn main() -> std::io::Result<()> {
                 web::scope("/admin")
                     .route("/health", web::get().to(admin::health))
                     .route("/config/pages", web::post().to(page::register_page))
+                    .route("/config/pages", web::get().to(page::get_pages))
                     .route("/rfa/register", web::post().to(page::register_rfa))
             )
     })
