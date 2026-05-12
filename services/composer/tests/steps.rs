@@ -23,15 +23,31 @@ impl ComposerWorld {
             page_config: HashMap::new(),
         }
     }
+
+    pub async fn cleanup(&mut self) {
+        // Reset state before each scenario
+        
+        let url = format!("{}:9000/admin/config", self.admin_url);
+        let response = self.client.as_ref().unwrap()
+            .delete(&url)
+            .send()
+            .await;
+
+        log::info!("Cleanup: Sent DELETE request to {}, {}", url, response.unwrap().status());
+
+        self.last_response = None;
+        self.last_status = None;
+        self.page_config.clear();
+    }
 }
 
-#[given(regex = r"^I register a page config:$")]
+
+
+#[given(regex = r"^a registered page config:$")]
 async fn register_page_config(world: &mut ComposerWorld, step: &GherkinStep) {
     let docstring = step
         .docstring()
         .expect("Expected docstring for page config");
-
-    println!("Injected page config script:\n{}", docstring);
 
     let payload: serde_json::Value = serde_json::from_str(docstring)
         .expect("Invalid JSON in page config docstring");
@@ -68,13 +84,48 @@ async fn register_page_config(world: &mut ComposerWorld, step: &GherkinStep) {
     }
 }
 
-#[when(regex = r#"^I register an RFA \"([^\"]+)\":$"#)]
+#[given(regex = r#"^a registered experiment:$"#)]
+async fn register_experiment_config(world: &mut ComposerWorld, step: &GherkinStep) {
+    let docstring = step
+        .docstring()
+        .expect("Expected docstring for experiment config");
+
+    let url = format!("{}:9000/admin/config/experiments", world.admin_url);
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&url)
+        .json(&docstring.parse::<serde_json::Value>().expect("Invalid JSON in experiment config"))
+        .send()
+        .await;
+
+    match response {
+        Ok(resp) => {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_else(|_| "no body".to_string());
+            
+            assert!(
+                status.is_success(),
+                "Failed to register Experiment. Status: {}, Response: {}",
+                status,
+                body
+            );
+        }
+        Err(e) => {
+            panic!(
+                "Failed to register Experiment at {}. Error: {}",
+                url, e
+            );
+        }
+    }
+
+}
+
+#[given(regex = r#"^a registered RFA \"([^\"]+)\":$"#)]
+#[when(regex = r#"^I register a RFA \"([^\"]+)\":$"#)]
 async fn register_rfa(world: &mut ComposerWorld, id: String, step: &GherkinStep) {
     let docstring = step
         .docstring()
         .expect("Expected docstring for RFA source");
-
-    println!("Injected RFA script for '{}':\n{}", id, docstring);
 
     let payload = serde_json::json!({
         "id": id,
@@ -82,7 +133,7 @@ async fn register_rfa(world: &mut ComposerWorld, id: String, step: &GherkinStep)
         "version": "1.0.0"
     });
 
-    let url = format!("{}:9000/admin/rfa/register", world.admin_url);
+    let url = format!("{}:9000/admin/config/rfas", world.admin_url);
     log::info!("Registering RFA '{}' at: {}", id, url);
     log::debug!("Payload: {}", serde_json::to_string_pretty(&payload).unwrap());
 

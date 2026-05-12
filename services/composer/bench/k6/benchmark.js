@@ -33,7 +33,7 @@ export function setup() {
     },
   };
 
-  let res = http.post(`${adminBase}/admin/rfa/register`, JSON.stringify(rfaPayload), {
+  let res = http.post(`${adminBase}/admin/config/rfas`, JSON.stringify(rfaPayload), {
     headers: { 'Content-Type': 'application/json' },
   });
   check(res, {
@@ -59,5 +59,4 @@ export default function (data) {
     'body contains hello': (r) => r.body.includes('hello k6'),
   });
 
-  sleep(Math.random() * 0.2);
 }

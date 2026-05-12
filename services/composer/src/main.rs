@@ -2,12 +2,14 @@ use actix_web::{web, App};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-mod admin;
 mod contextloader;
 mod page;
 mod render;
+mod experiment;
+mod admin;
 
 pub use page::{DataValue, PageConfig, RFAConfig};
+pub use experiment::{ExperimentConfig, Variant};
 
 pub struct AppState {
     pub pages: Mutex<HashMap<String, PageConfig>>,
@@ -42,9 +44,11 @@ async fn main() -> std::io::Result<()> {
             .service(
                 web::scope("/admin")
                     .route("/health", web::get().to(admin::health))
+                    .route("/config", web::delete().to(admin::reset_config))
                     .route("/config/pages", web::post().to(page::register_page))
                     .route("/config/pages", web::get().to(page::get_pages))
-                    .route("/rfa/register", web::post().to(page::register_rfa))
+                    .route("/config/rfas", web::post().to(page::register_rfa))
+                    .route("/config/experiments", web::post().to(experiment::register_experiment))
             )
     })
     .bind("0.0.0.0:9000")?

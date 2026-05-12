@@ -36,7 +36,7 @@ services:
       - K6_DURATION=${K6_DURATION:-15s}
       - K6_HOST=composer
     entrypoint: ["/bin/sh", "-c"]
-    command: "k6 run --summary-export=/output/k6-summary.json --out json=/output/k6-results.json benchmark.js"
+    command: '"k6 run --summary-export=/output/k6-summary.json --out json=/output/k6-results.json benchmark.js"'
     stdin_open: true
     tty: true
     depends_on:

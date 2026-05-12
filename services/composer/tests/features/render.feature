@@ -1,7 +1,10 @@
-Feature: Composer renders pages with RFA templates
+Feature: Composer renders registererd pages 
+As a product manager, I want the composer to render pages based on the registered page configurations and RFAs, so that I can create dynamic and personalized user experiences.
+It is important that pages are isolated from each other and rendered efficiently to ensure awesome response times and a great User Experience.
 
-  Scenario: Register a page and render it
-    Given I register a page config:
+Rule: If I register a page config and an RFA, the composer should use them to render the page when requested.
+  Example: Register a page and render it
+    Given a registered page config:
       """
       {
         "path": "/my/shop/cart.fancy",
@@ -17,10 +20,10 @@ Feature: Composer renders pages with RFA templates
         }
       }
       """
-      When I register an RFA "cart-rfa":
+    And a registered RFA "cart-rfa":
       """
       function(context) { return "Rendered: Currency is " + context.currency; }
       """
-    And I request GET /my/shop/cart.fancy
+    When I request GET /my/shop/cart.fancy
     Then the response status should be 200
     And the response should contain "Rendered: Currency is EUR"

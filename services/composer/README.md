@@ -10,7 +10,7 @@ Built with **Actix-web** for maximum performance and non-blocking async I/O.
 
 ```bash
 # Build and run locally
-cargo run
+RUST_LOG=DEBUG bacon long_run
 
 # In another terminal, test the service
 curl -X POST http://localhost:9000/admin/config/pages \
@@ -25,6 +25,13 @@ curl -X POST http://localhost:9000/admin/config/pages \
   }'
 
 curl http://localhost:8080/my/page
+```
+
+### Testing
+
+To run Cucumbertests with Docstrings in Output run:
+```bash
+cargo test --test cucumber -- -vvv
 ```
 
 ### Docker Compose

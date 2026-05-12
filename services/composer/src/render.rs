@@ -20,6 +20,7 @@ pub enum RenderRequest {
 
 pub enum AdminCommand {
     RegisterRfa(page::RFAConfig),
+    ResetRfas,
 }
 
 impl RenderPool {
@@ -99,6 +100,14 @@ impl Worker {
                         let _ = self.runtime.execute_script(
                             "<rfa-register>",
                             deno_core::FastString::from(registration),
+                        );
+                    }
+
+                    AdminCommand::ResetRfas => {
+                        let reset = format!("globalThis.rfaRegistry = {{}};");
+                        let _ = self.runtime.execute_script(
+                            "<rfa-reset>",
+                            deno_core::FastString::from(reset),
                         );
                     }
                 }
@@ -193,4 +202,10 @@ pub async fn render_page(
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(html)
+}
+
+pub async fn reset_config(state: web::Data<AppState>) {
+        state.render_pool.admin_senders.iter().for_each(|sender| {
+            sender.send(AdminCommand::ResetRfas).ok();
+        });       
 }

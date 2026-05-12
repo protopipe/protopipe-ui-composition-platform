@@ -109,6 +109,17 @@ pub async fn get_pages(state: web::Data<AppState>) -> HttpResponse {
     HttpResponse::Ok().json(page_list)
 }
 
+pub async fn reset_config(state: web::Data<AppState>) {
+    {
+        let mut pages = state.pages.lock().unwrap();
+        pages.clear();
+    }
+    {
+        let mut rfas = state.rfas.lock().unwrap();
+        rfas.clear();
+    }
+}
+
 pub async fn register_rfa(
     state: web::Data<AppState>,
     config: web::Json<RFAConfigDto>,
