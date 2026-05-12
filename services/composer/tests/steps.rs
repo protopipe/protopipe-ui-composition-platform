@@ -1,5 +1,7 @@
 use cucumber::{given, when, then, gherkin::Step as GherkinStep};
 use std::collections::HashMap;
+use reqwest::cookie::{Jar};
+use std::sync::Arc;
 
 #[derive(cucumber::World, Debug)]
 #[world(init = ComposerWorld::new)]
@@ -9,17 +11,25 @@ pub struct ComposerWorld {
     pub admin_url: String,
     pub last_response: Option<String>,
     pub last_status: Option<u16>,
+    pub last_headers: Option<reqwest::header::HeaderMap>,
+    pub cookie_jar: Arc<Jar>,
     pub page_config: HashMap<String, String>,
 }
 
 impl ComposerWorld {
     pub fn new() -> Self {
+        let jar = Arc::new(Jar::default());
         Self {
-            client: Some(reqwest::Client::new()),
+            client: Some(reqwest::Client::builder()
+                .cookie_provider(Arc::clone(&jar))
+                .build().unwrap()
+            ),
             base_url: "http://localhost".to_string(),
             admin_url: "http://localhost".to_string(),
             last_response: None,
             last_status: None,
+            last_headers: None,
+            cookie_jar: jar,
             page_config: HashMap::new(),
         }
     }
@@ -120,6 +130,13 @@ async fn register_experiment_config(world: &mut ComposerWorld, step: &GherkinSte
 
 }
 
+#[given(regex = r#"^I have accepted the experiment cookie "([^"]*)" with value "([^"]*)"$"#)]
+async fn have_accepted_experiment_cookie(world: &mut ComposerWorld, step: &GherkinStep, cookie_name: String, cookie_value: String) {
+    let cookie_str = format!("{}={}", cookie_name, cookie_value);
+    let url = format!("{}:8080", world.base_url).parse::<reqwest::Url>().expect("Invalid base URL");
+    world.cookie_jar.add_cookie_str(&cookie_str, &url);
+}
+
 #[given(regex = r#"^a registered RFA \"([^\"]+)\":$"#)]
 #[when(regex = r#"^I register a RFA \"([^\"]+)\":$"#)]
 async fn register_rfa(world: &mut ComposerWorld, id: String, step: &GherkinStep) {
@@ -171,12 +188,15 @@ async fn request_page(world: &mut ComposerWorld, path: String) {
     let url = format!("{}:8080{}", world.base_url, path);
     log::info!("Requesting page: {}", url);
 
-    let client = reqwest::Client::new();
-    let response = client.get(&url).send().await;
+    let client = world.client.as_ref().expect("HTTP client not initialized");
+    let response = client
+        .get(&url)
+        .send().await;
 
     match response {
         Ok(resp) => {
             world.last_status = Some(resp.status().as_u16());
+            world.last_headers = Some(resp.headers().clone());
             world.last_response = Some(resp.text().await.unwrap_or_default());
             log::debug!("Response status: {}", world.last_status.unwrap());
             log::debug!("Response body length: {}", world.last_response.as_ref().unwrap().len());
@@ -211,5 +231,19 @@ async fn check_response_contains(world: &mut ComposerWorld, expected_text: Strin
         "Expected text '{}' not found in response.\n\nActual response:\n{}",
         expected_text,
         response
+    );
+}
+
+#[then(regex = r#"^the response should contain a Cookie "experiment_welcome_message_test" with value \"([^\"]+)\" or \"([^\"]+)\"$"#)]
+async fn check_response_contains_cookie(world: &mut ComposerWorld, variant_a: String, variant_b: String) {
+    let headers = world
+        .last_headers
+        .as_ref()
+        .expect("No response received");
+
+    assert!(
+        headers.get("Set-Cookie").map_or(false, |v| v.to_str().unwrap_or("").contains(&format!("experiment_welcome_message_test={}", variant_a)) || v.to_str().unwrap_or("").contains(&format!("experiment_welcome_message_test={}", variant_b))),
+        "Expected cookie not found in response.\n\nActual response:\n{}",
+       headers.get("Set-Cookie").map_or("No Set-Cookie header".to_string(), |v| v.to_str().unwrap_or("Invalid Set-Cookie header").to_string()) 
     );
 }

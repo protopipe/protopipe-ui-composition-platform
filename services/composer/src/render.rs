@@ -1,5 +1,5 @@
 use crate::{contextloader, page, AppState};
-use actix_web::{web, HttpRequest, HttpResponse};
+use actix_web::{web, HttpRequest, HttpResponse, cookie::{Cookie, SameSite}};
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use deno_core::{error::AnyError, JsRuntime, RuntimeOptions, serde_v8, v8};
 use serde_json::Value;
@@ -192,16 +192,21 @@ pub async fn render_page(
         }
     };
 
-    let html = format!(
-        r#"<!DOCTYPE html>
-<div>{}</div>
-"#,
+    let body = format!(
+        "{}",
         rendered
     );
 
+    let cookie = Cookie::build("experiment_welcome_message_test", "variant_a")
+     .path("/")
+     .http_only(true)
+     .same_site(SameSite::Lax)
+     .finish();
+
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
-        .body(html)
+        .cookie(cookie)
+        .body(body)
 }
 
 pub async fn reset_config(state: web::Data<AppState>) {

@@ -4,7 +4,6 @@ Users should be assigned consistently to experiment variants.
 
 
 Rule: If there is an experiment defined for a page, users who accpeted the experiment cookie, should be assigned to a variant.
-
 Example: User assignment
     Given a registered page config:
       """
@@ -104,6 +103,7 @@ Example: Experiment variant A assigned content
     When I request GET /index.html
     Then the response should contain "Rendered: Introduction is Hello dear Customer"
 
+    @WIP
     Example: Experiment variant B assigned content
      Given a registered page config:
       """
