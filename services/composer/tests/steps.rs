@@ -247,3 +247,17 @@ async fn check_response_contains_cookie(world: &mut ComposerWorld, variant_a: St
        headers.get("Set-Cookie").map_or("No Set-Cookie header".to_string(), |v| v.to_str().unwrap_or("Invalid Set-Cookie header").to_string()) 
     );
 }
+
+#[then(regex = r#"^the response should have content-type "([^\"]+)"$"#)]
+async fn check_response_has_content_type_json(world: &mut ComposerWorld, expected_content_type: String) {
+    let headers = world
+        .last_headers
+        .as_ref()
+        .expect("No response received");
+
+    assert!(
+        headers.get("Content-Type").map_or(false, |v| v.to_str().unwrap_or("").contains(&expected_content_type)),
+        "Expected content-type 'application/json' not found in response.\n\nActual response:\n{}",
+        headers.get("Content-Type").map_or("No Content-Type header".to_string(), |v| v.to_str().unwrap_or("Invalid Content-Type header").to_string())
+    );
+}
