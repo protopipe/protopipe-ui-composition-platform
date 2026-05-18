@@ -163,10 +163,32 @@ async fn have_accepted_experiment_cookie(
     cookie_value: String,
 ) {
     let _ = step;
-    let cookie_str = format!("{}={}", cookie_name, cookie_value);
     let url = format!("{}:8080", world.base_url)
         .parse::<reqwest::Url>()
         .expect("Invalid base URL");
+    world
+        .cookie_jar
+        .add_cookie_str("pp_xa_allowd=true; Path=/; SameSite=Lax", &url);
+
+    let cookie_str = format!("{}={}", cookie_name, cookie_value);
+    world.cookie_jar.add_cookie_str(&cookie_str, &url);
+}
+
+#[given(
+    regex = r#"I have the experiment cookie "([^"]*)" with value "([^"]*)" without consenting to the experiment cookies"#
+)]
+async fn have_experiment_cookie_without_consent(
+    world: &mut ComposerWorld,
+    step: &GherkinStep,
+    cookie_name: String,
+    cookie_value: String,
+) {
+    let _ = step;
+    let url = format!("{}:8080", world.base_url)
+        .parse::<reqwest::Url>()
+        .expect("Invalid base URL");
+
+    let cookie_str = format!("{}={}", cookie_name, cookie_value);
     world.cookie_jar.add_cookie_str(&cookie_str, &url);
 }
 
@@ -208,6 +230,20 @@ async fn register_rfa(world: &mut ComposerWorld, id: String, step: &GherkinStep)
             panic!("Failed to register RFA '{}' at {}. Error: {}", id, url, e);
         }
     }
+}
+
+#[when(regex = r"^I have accepted experiment cookies$")]
+async fn have_accepted_experiment_cookies(world: &mut ComposerWorld) {
+    let cookie_str = "pp_xa_allowd=true; Path=/; SameSite=Lax";
+    let url = format!("{}:8080", world.base_url)
+        .parse::<reqwest::Url>()
+        .expect("Invalid base URL");
+    world.cookie_jar.add_cookie_str(cookie_str, &url);
+}
+
+#[when(regex = r"I have not accepted any tracking and experiment cookies$")]
+async fn have_not_accepted_experiment_cookies(_world: &mut ComposerWorld) {
+    // Do nothing, as the cookie is not accepted
 }
 
 #[when(regex = r"^I request GET (.+)$")]
@@ -277,7 +313,7 @@ async fn check_response_contains_json(world: &mut ComposerWorld) {
 }
 
 #[then(
-    regex = r#"^the response should contain a Cookie "experiment_welcome_message_test" with value \"([^\"]+)\" or \"([^\"]+)\"$"#
+    regex = r#"^the response should contain a Cookie "pp_experiment_welcome_message_test" with value \"([^\"]+)\" or \"([^\"]+)\"$"#
 )]
 async fn check_response_contains_cookie(
     world: &mut ComposerWorld,
@@ -290,10 +326,10 @@ async fn check_response_contains_cookie(
         headers.get("Set-Cookie").map_or(false, |v| v
             .to_str()
             .unwrap_or("")
-            .contains(&format!("experiment_welcome_message_test={}", variant_a))
+            .contains(&format!("pp_experiment_welcome_message_test={}", variant_a))
             || v.to_str()
                 .unwrap_or("")
-                .contains(&format!("experiment_welcome_message_test={}", variant_b))),
+                .contains(&format!("pp_experiment_welcome_message_test={}", variant_b))),
         "Expected cookie not found in response.\n\nActual response:\n{}",
         headers
             .get("Set-Cookie")
@@ -301,6 +337,50 @@ async fn check_response_contains_cookie(
                 .to_str()
                 .unwrap_or("Invalid Set-Cookie header")
                 .to_string())
+    );
+}
+
+#[then(
+    regex = r#"^the response should not contain a Cookie "pp_experiment_welcome_message_test" with value \"([^\"]+)\" or \"([^\"]+)\"$"#
+)]
+async fn check_response_not_contains_cookie(
+    world: &mut ComposerWorld,
+    variant_a: String,
+    variant_b: String,
+) {
+    let headers = world.last_headers.as_ref().expect("No response received");
+
+    assert!(
+        !headers.get("Set-Cookie").map_or(false, |v| v
+            .to_str()
+            .unwrap_or("")
+            .contains(&format!("pp_experiment_welcome_message_test={}", variant_a))
+            || v.to_str()
+                .unwrap_or("")
+                .contains(&format!("pp_experiment_welcome_message_test={}", variant_b))),
+        "Unexpected cookie found in response.\n\nActual response:\n{}",
+        headers
+            .get("Set-Cookie")
+            .map_or("No Set-Cookie header".to_string(), |v| v
+                .to_str()
+                .unwrap_or("Invalid Set-Cookie header")
+                .to_string())
+    );
+}
+
+#[then(regex = r#"^the response should delete the Cookie "([^"]*)"$"#)]
+async fn check_response_deletes_cookie(world: &mut ComposerWorld, cookie_name: String) {
+    let headers = world.last_headers.as_ref().expect("No response received");
+    let set_cookie = headers
+        .get("Set-Cookie")
+        .map(|v| v.to_str().unwrap_or(""))
+        .unwrap_or("");
+
+    assert!(
+        set_cookie.contains(&format!("{}=", cookie_name)) && set_cookie.contains("Max-Age=0"),
+        "Expected deleted cookie '{}' not found in response.\n\nActual response:\n{}",
+        cookie_name,
+        set_cookie
     );
 }
 

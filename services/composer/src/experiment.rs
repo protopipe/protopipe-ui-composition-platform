@@ -7,6 +7,8 @@ use actix_web::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+const EXPERIMENT_COOKIE_CONSENT: &str = "pp_xa_allowd";
+
 #[derive(Clone)]
 pub struct ExperimentConfig {
     pub id: String,
@@ -56,6 +58,11 @@ pub struct ResolvedPageConfig {
     pub assignment_cookie: Option<Cookie<'static>>,
 }
 
+struct VariantAssignment<'a> {
+    variant: &'a Variant,
+    should_set_cookie: bool,
+}
+
 pub fn resolve_page_config(
     state: &web::Data<AppState>,
     req: &HttpRequest,
@@ -67,17 +74,18 @@ pub fn resolve_page_config(
     let experiments = state.experiments.lock().unwrap();
     for experiment in experiments.values() {
         let cookie_name = experiment_cookie_name(&experiment.id);
-        let variant = req
-            .cookie(&cookie_name)
-            .and_then(|cookie| experiment.variant(cookie.value()))
-            .or_else(|| experiment.default_variant());
 
-        if let Some(variant) = variant {
-            apply_overrides(&mut page_config, &variant.overrides);
+        if should_delete_experiment_cookie(req, &cookie_name) {
+            assignment_cookie = Some(expire_experiment_cookie(&cookie_name));
+            break;
+        }
 
-            if req.cookie(&cookie_name).is_none() {
+        if let Some(assignment) = determine_variant(experiment, req, &cookie_name) {
+            apply_overrides(&mut page_config, &assignment.variant.overrides);
+
+            if assignment.should_set_cookie {
                 assignment_cookie = Some(
-                    Cookie::build(cookie_name, variant.id.clone())
+                    Cookie::build(cookie_name, assignment.variant.id.clone())
                         .path("/")
                         .http_only(true)
                         .same_site(SameSite::Lax)
@@ -157,6 +165,50 @@ impl ExperimentConfig {
     }
 }
 
+fn determine_variant<'a>(
+    experiment: &'a ExperimentConfig,
+    req: &HttpRequest,
+    cookie_name: &str,
+) -> Option<VariantAssignment<'a>> {
+    if !has_experiment_cookie_consent(req) {
+        return None;
+    }
+
+    if let Some(variant) = req
+        .cookie(cookie_name)
+        .and_then(|cookie| experiment.variant(cookie.value()))
+    {
+        return Some(VariantAssignment {
+            variant,
+            should_set_cookie: false,
+        });
+    }
+
+    experiment
+        .default_variant()
+        .map(|variant| VariantAssignment {
+            variant,
+            should_set_cookie: true,
+        })
+}
+
+fn has_experiment_cookie_consent(req: &HttpRequest) -> bool {
+    req.cookie(EXPERIMENT_COOKIE_CONSENT).is_some()
+}
+
+fn should_delete_experiment_cookie(req: &HttpRequest, cookie_name: &str) -> bool {
+    !has_experiment_cookie_consent(req) && req.cookie(cookie_name).is_some()
+}
+
+fn expire_experiment_cookie(cookie_name: &str) -> Cookie<'static> {
+    Cookie::build(cookie_name.to_string(), "")
+        .path("/")
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .max_age(actix_web::cookie::time::Duration::seconds(0))
+        .finish()
+}
+
 impl From<PageOverridesDto> for PageOverrides {
     fn from(value: PageOverridesDto) -> Self {
         Self {
@@ -206,5 +258,5 @@ fn apply_overrides(page_config: &mut page::PageConfig, overrides: &PageOverrides
 }
 
 fn experiment_cookie_name(experiment_id: &str) -> String {
-    format!("experiment_{}", experiment_id)
+    format!("pp_experiment_{}", experiment_id)
 }
