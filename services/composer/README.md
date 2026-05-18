@@ -9,8 +9,11 @@ Built with **Actix-web** for maximum performance and non-blocking async I/O.
 ### Local Development
 
 ```bash
-# Build and run locally
+# Build and run locally with bacon
 RUST_LOG=DEBUG bacon long_run
+
+# Or run through the project Compose environment
+podman-compose -f ../../compose.yaml --profile dev up --build
 
 # In another terminal, test the service
 curl -X POST http://localhost:9000/admin/config/pages \
@@ -29,16 +32,18 @@ curl http://localhost:8080/my/page
 
 ### Testing
 
-To run Cucumbertests with Docstrings in Output run:
+The Cucumber tests are blackbox tests under `tests/bdd` at the repository root.
+Run them through the shared Compose environment:
+
 ```bash
-cargo test --test cucumber -- -vvv
+podman-compose -f compose.yaml --profile test up --build --abort-on-container-exit --exit-code-from test-bdd
 ```
 
 ### Docker Compose
 
 ```bash
 # Start all services (Composer + WireMock)
-docker-compose up --build
+podman-compose -f compose.yaml --profile dev up --build
 
 # Test
 curl -X POST http://localhost:9000/admin/config/pages \
@@ -55,6 +60,12 @@ curl -X POST http://localhost:9000/admin/config/pages \
 curl http://localhost:8080/shop/cart
 ```
 
+### GitHub Actions
+
+The CI workflow uses Docker Compose for service startup, tests, and the k6
+smoke test. GitHub Actions is intentionally thin and invokes the same
+`compose.yaml` profiles used locally.
+
 ## Ports
 
 - **Admin Port (9000)**: `/admin/config/pages`, `/admin/rfa/register`, `/admin/health`
@@ -62,15 +73,11 @@ curl http://localhost:8080/shop/cart
 
 ## Benchmarking
 
-A k6 benchmark is available under `services/composer/bench/k6/benchmark.js`.
-The GitHub Actions workflow is defined in `.github/workflows/composer-k6-benchmark.yml`.
-You can test Github Actions with the Github-Extension act:
+A k6 smoke test is available under `tests/load/composer-smoke.js`.
+Run it locally with:
+
 ```
- gh extension install https://github.com/nektos/gh-act
-```
-and run via:
-```
- gh act workflow_dispatch -j composer-benchmark
+podman-compose -f compose.yaml --profile load up --build --abort-on-container-exit --exit-code-from test-load
 ```
 
 

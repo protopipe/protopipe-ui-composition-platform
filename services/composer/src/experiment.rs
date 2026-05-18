@@ -1,8 +1,7 @@
 use crate::page;
 use crate::AppState;
-use actix_web::{web, HttpRequest, HttpResponse};
+use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 pub struct ExperimentConfig {
     pub id: String,
@@ -24,7 +23,7 @@ pub struct VariantDto {
 pub struct Variant {
     pub id: String,
     pub weight: u32,
-    pub overrideConfig: page::PageConfig,
+    pub override_config: page::PageConfig,
 }
 
 pub enum Override {

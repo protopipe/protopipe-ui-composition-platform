@@ -1,0 +1,77 @@
+name: protopipe-ui-composition-platform
+
+x-composer-env: &composer-env
+  RUST_LOG: info
+
+services:
+  composer:
+    build:
+      context: ./services/composer
+      dockerfile: Dockerfile
+      target: runtime
+    environment:
+      <<: *composer-env
+    ports:
+      - "8080:8080"
+      - "9000:9000"
+    profiles:
+      - dev
+      - test
+      - load
+      - ci
+
+  wiremock:
+    image: wiremock/wiremock:3.13.2
+    command:
+      - --global-response-templating
+      - --verbose
+    ports:
+      - "8081:8080"
+    profiles:
+      - dev
+      - test
+      - load
+      - ci
+
+  test-bdd:
+    image: rust:1.95-bookworm
+    working_dir: /workspace
+    volumes:
+      - .:/workspace:Z
+    environment:
+      COMPOSER_BASE_URL: http://composer
+      COMPOSER_ADMIN_URL: http://composer
+      CUCUMBER_FEATURES: /workspace/tests/bdd/features
+    command:
+      - cargo
+      - test
+      - --manifest-path
+      - tests/bdd/Cargo.toml
+      - --test
+      - cucumber
+      - --
+      - --tags
+      - not @WIP
+    depends_on:
+      - composer
+      - wiremock
+    profiles:
+      - test
+      - ci
+
+  test-load:
+    image: grafana/k6:1.0.0
+    working_dir: /scripts
+    volumes:
+      - ./tests/load:/scripts:Z
+    environment:
+      COMPOSER_BASE_URL: http://composer:8080
+      COMPOSER_ADMIN_URL: http://composer:9000
+    command:
+      - run
+      - /scripts/composer-smoke.js
+    depends_on:
+      - composer
+      - wiremock
+    profiles:
+      - load

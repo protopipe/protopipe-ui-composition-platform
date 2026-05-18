@@ -1,0 +1,7 @@
+/target/
+**/target/
+.env
+.env.*
+!.env.example
+doc/plantuml/out/*
+!doc/plantuml/out/.gitkeep

@@ -118,6 +118,7 @@ pub async fn reset_config(state: web::Data<AppState>) {
         let mut rfas = state.rfas.lock().unwrap();
         rfas.clear();
     }
+    
 }
 
 pub async fn register_rfa(

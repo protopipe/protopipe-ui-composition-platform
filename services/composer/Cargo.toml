@@ -1,10 +1,10 @@
 [package]
-name = "composer"
+name = "protopipe-composer"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "composer"
+name = "protopipe-composer"
 path = "src/main.rs"
 
 [dependencies]
@@ -21,12 +21,3 @@ env_logger = "0.11"
 futures = "0.3"
 crossbeam-channel = "0.5"
 deno_core = "0.399.0"
-
-[[test]]
-name = "cucumber"
-harness = false
-
-[dev-dependencies]
-cucumber = "0.20"
-tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.11", features = ["json", "cookies"] }

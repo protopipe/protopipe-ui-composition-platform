@@ -20,9 +20,31 @@ dedicated chapters under `docs/arc42`.
 - `docs/` – architecture, ADRs, diagrams
 - `deployments/` – Helm / Kustomize
 - `examples/` – reference implementations
+- `tests/bdd/` – Cucumber blackbox tests
+- `tests/load/` – k6 smoke load tests
+
+## Development
+
+The local and CI execution model is based on the Compose Specification. The
+same profiles are used locally and in GitHub Actions.
+
+```bash
+podman-compose -f compose.yaml --profile dev up --build
+```
+
+Run blackbox BDD tests:
+
+```bash
+podman-compose -f compose.yaml --profile test up --build --abort-on-container-exit --exit-code-from test-bdd
+```
+
+Run the k6 smoke load test:
+
+```bash
+podman-compose -f compose.yaml --profile load up --build --abort-on-container-exit --exit-code-from test-load
+```
 
 ## License
 
 This project is licensed under **GPL-3.0-only**.  
 See [LICENSE](LICENSE) for details.
-
