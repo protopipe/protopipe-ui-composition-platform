@@ -29,19 +29,28 @@ The local and CI execution model is based on the Compose Specification. The
 same profiles are used locally and in GitHub Actions.
 
 ```bash
-podman-compose -f compose.yaml --profile dev up --build
+podman compose --profile dev run --rm bdd-dev
+```
+
+`bdd-dev` is configured so you can pass additional Cucumber args/tags on
+the command line.
+
+When you are done, stop services started by Compose:
+
+```bash
+podman compose --profile dev down --remove-orphans
 ```
 
 Run blackbox BDD tests:
 
 ```bash
-podman-compose -f compose.yaml --profile test up --build --abort-on-container-exit --exit-code-from test-bdd
+podman compose --profile test up --build --abort-on-container-exit --exit-code-from test-bdd
 ```
 
 Run the k6 smoke load test:
 
 ```bash
-podman-compose -f compose.yaml --profile load up --build --abort-on-container-exit --exit-code-from test-load
+podman compose --profile load up --build --abort-on-container-exit --exit-code-from test-load
 ```
 
 ## License

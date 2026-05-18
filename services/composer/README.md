@@ -12,8 +12,11 @@ Built with **Actix-web** for maximum performance and non-blocking async I/O.
 # Build and run locally with bacon
 RUST_LOG=DEBUG bacon long_run
 
-# Or run through the project Compose environment
-podman-compose -f ../../compose.yaml --profile dev up --build
+# Or run through the project Compose environment (auto-starts dependencies)
+podman compose -f ../../compose.yaml --profile dev run --rm bdd-dev
+
+# Stop started services when done
+podman compose -f ../../compose.yaml --profile dev down --remove-orphans
 
 # In another terminal, test the service
 curl -X POST http://localhost:9000/admin/config/pages \
@@ -36,14 +39,23 @@ The Cucumber tests are blackbox tests under `tests/bdd` at the repository root.
 Run them through the shared Compose environment:
 
 ```bash
-podman-compose -f compose.yaml --profile test up --build --abort-on-container-exit --exit-code-from test-bdd
+podman compose -f ../../compose.yaml --profile test up --build --abort-on-container-exit --exit-code-from test-bdd
+```
+
+For ad-hoc retry during local development, use the `dev` profile:
+
+```bash
+podman compose -f ../../compose.yaml --profile dev run --rm bdd-dev
 ```
 
 ### Docker Compose
 
 ```bash
-# Start all services (Composer + WireMock)
-podman-compose -f compose.yaml --profile dev up --build
+# Run Cucumber in dev mode (Composer + WireMock are auto-started)
+podman compose -f ../../compose.yaml --profile dev run --rm bdd-dev
+
+# Stop started services
+podman compose -f ../../compose.yaml --profile dev down --remove-orphans
 
 # Test
 curl -X POST http://localhost:9000/admin/config/pages \
@@ -77,7 +89,7 @@ A k6 smoke test is available under `tests/load/composer-smoke.js`.
 Run it locally with:
 
 ```
-podman-compose -f compose.yaml --profile load up --build --abort-on-container-exit --exit-code-from test-load
+podman compose -f ../../compose.yaml --profile load up --build --abort-on-container-exit --exit-code-from test-load
 ```
 
 

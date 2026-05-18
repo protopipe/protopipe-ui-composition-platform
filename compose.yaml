@@ -15,10 +15,32 @@ services:
       - "8080:8080"
       - "9000:9000"
     profiles:
-      - dev
       - test
       - load
       - ci
+
+  composer-dev:
+    build:
+      context: ./services/composer
+      dockerfile: Dockerfile
+      target: dev
+    working_dir: /app
+    volumes:
+      - ./services/composer:/app
+      - composer-target:/app/target
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+    environment:
+      RUST_LOG: debug
+    command:
+      - bacon
+      - --headless
+      - run-long
+    ports:
+      - "8080:8080"
+      - "9000:9000"
+    profiles:
+      - dev
 
   wiremock:
     image: wiremock/wiremock:3.13.2
@@ -32,6 +54,29 @@ services:
       - test
       - load
       - ci
+
+  bdd-dev:
+    image: rust:1.95-bookworm
+    working_dir: /workspace
+    volumes:
+      - .:/workspace:Z
+      - bdd-target:/workspace/tests/bdd/target
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+    environment:
+      COMPOSER_BASE_URL: http://composer-dev
+      COMPOSER_ADMIN_URL: http://composer-dev
+      CUCUMBER_FEATURES: /workspace/tests/bdd/features
+      TERM: xterm-256color
+    entrypoint: ["cargo", "test", "--manifest-path", "tests/bdd/Cargo.toml", "--test", "cucumber", "--"]
+    command:
+      - --tags
+      - '@WIP'
+    depends_on:
+      - composer-dev
+      - wiremock
+    profiles:
+      - dev
 
   test-bdd:
     image: rust:1.95-bookworm
@@ -75,3 +120,9 @@ services:
       - wiremock
     profiles:
       - load
+
+volumes:
+  bdd-target:
+  cargo-git:
+  cargo-registry:
+  composer-target:
