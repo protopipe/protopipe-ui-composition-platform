@@ -259,6 +259,23 @@ async fn check_response_contains(world: &mut ComposerWorld, expected_text: Strin
     );
 }
 
+#[then(regex = r#"^the response should contain JSON:$"#)]
+async fn check_response_contains_json(world: &mut ComposerWorld) {
+    let docstring = world
+        .last_response
+        .as_ref()
+        .expect("No response received")
+        .trim();
+    let response = world.last_response.as_ref().expect("No response received");
+
+    assert!(
+        response.contains(&docstring),
+        "Expected JSON '{}' not found in response.\n\nActual response:\n{}",
+        docstring,
+        response
+    );
+}
+
 #[then(
     regex = r#"^the response should contain a Cookie "experiment_welcome_message_test" with value \"([^\"]+)\" or \"([^\"]+)\"$"#
 )]

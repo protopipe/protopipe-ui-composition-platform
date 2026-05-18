@@ -204,7 +204,7 @@ pub async fn render_page(
      .finish();
 
     HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
+        .content_type(page_config.content_type.clone())
         .cookie(cookie)
         .body(body)
 }

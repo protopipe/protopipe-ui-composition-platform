@@ -68,7 +68,7 @@ services:
       COMPOSER_ADMIN_URL: http://composer-dev
       CUCUMBER_FEATURES: /workspace/tests/bdd/features
       TERM: xterm-256color
-    entrypoint: ["cargo", "test", "--manifest-path", "tests/bdd/Cargo.toml", "--test", "cucumber", "--"]
+    entrypoint: ["cargo", "test", "--manifest-path", "tests/bdd/Cargo.toml", "--test", "cucumber", "--", "-vvv"]
     command:
       - --tags
       - '@WIP'
@@ -95,6 +95,7 @@ services:
       - --test
       - cucumber
       - --
+      - -vvv
       - --tags
       - not @WIP
     depends_on:

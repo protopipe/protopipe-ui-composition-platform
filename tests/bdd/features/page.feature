@@ -103,7 +103,6 @@ Example: Register a generic and a specific page config
         And the response should have content-type "text/html; charset=utf-8"
         And the response should contain "Rendered: Currency is EUR" 
 
-        @WIP
         Example: Register a page config with content-type and render it
         Given a registered page config:
         """
@@ -129,6 +128,9 @@ Example: Register a generic and a specific page config
         When I request GET /my/shop/cart.json
         Then the response status should be 200
         And the response should have content-type "application/json"
-        And the response should contain '{"message":"Currency is EUR"}'
+        And the response should contain JSON:
+        """
+        {"message":"Currency is EUR"}
+        """
 
       

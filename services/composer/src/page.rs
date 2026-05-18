@@ -33,6 +33,7 @@ pub struct PageConfig {
     pub template: String,
     pub rfa: String,
     pub timeout_ms: u64,
+    pub content_type: String,
     pub data: HashMap<String, DataValue>,
 }
 
@@ -52,6 +53,7 @@ pub struct PageConfigDto {
     pub template: String,
     pub rfa: String,
     pub timeout_ms: u64,
+    pub content_type: Option<String>,
     pub data: PageDataDto,
 }
 
@@ -82,6 +84,7 @@ pub async fn register_page(
         template: config.template.clone(),
         rfa: config.rfa.clone(),
         timeout_ms: config.timeout_ms,
+        content_type: config.content_type.clone().unwrap_or_else(|| "text/html; charset=utf-8".into()),
         data: config.data.clone().into_iter().collect(),
     };
 
@@ -102,6 +105,7 @@ pub async fn get_pages(state: web::Data<AppState>) -> HttpResponse {
             template: config.template.clone(),
             rfa: config.rfa.clone(),
             timeout_ms: config.timeout_ms,
+            content_type: Some(config.content_type.clone()),
             data: config.data.clone().into_iter().collect(),
         })
         .collect();
