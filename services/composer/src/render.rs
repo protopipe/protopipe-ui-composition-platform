@@ -1,7 +1,7 @@
-use crate::{contextloader, page, AppState};
-use actix_web::{web, HttpRequest, HttpResponse, cookie::{Cookie, SameSite}};
+use crate::{contextloader, experiment, page, AppState};
+use actix_web::{web, HttpRequest, HttpResponse};
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use deno_core::{error::AnyError, JsRuntime, RuntimeOptions, serde_v8, v8};
+use deno_core::{error::AnyError, serde_v8, v8, JsRuntime, RuntimeOptions};
 use serde_json::Value;
 use tokio::sync::oneshot;
 
@@ -49,7 +49,7 @@ impl RenderPool {
                 .send(AdminCommand::RegisterRfa(rfa.clone()))
                 .map_err(|_| AnyError::msg("admin command queue closed"))?;
         }
-        
+
         Ok(())
     }
 
@@ -65,7 +65,8 @@ impl RenderPool {
             .send(request)
             .map_err(|_| AnyError::msg("render worker queue closed"))?;
 
-        rx.await.map_err(|_| AnyError::msg("render response canceled"))?
+        rx.await
+            .map_err(|_| AnyError::msg("render response canceled"))?
     }
 }
 
@@ -86,8 +87,11 @@ impl Worker {
         Self { runtime }
     }
 
-    fn run(mut self, admin_cmd_receiver: Receiver<AdminCommand>, render_receiver: Receiver<RenderRequest>) {
-
+    fn run(
+        mut self,
+        admin_cmd_receiver: Receiver<AdminCommand>,
+        render_receiver: Receiver<RenderRequest>,
+    ) {
         loop {
             while let Ok(cmd) = admin_cmd_receiver.try_recv() {
                 match cmd {
@@ -105,17 +109,20 @@ impl Worker {
 
                     AdminCommand::ResetRfas => {
                         let reset = format!("globalThis.rfaRegistry = {{}};");
-                        let _ = self.runtime.execute_script(
-                            "<rfa-reset>",
-                            deno_core::FastString::from(reset),
-                        );
+                        let _ = self
+                            .runtime
+                            .execute_script("<rfa-reset>", deno_core::FastString::from(reset));
                     }
                 }
             }
 
             let render_cmd = render_receiver.try_recv();
             match render_cmd {
-                Ok(RenderRequest::Render { rfa_id, context_json, response }) => {
+                Ok(RenderRequest::Render {
+                    rfa_id,
+                    context_json,
+                    response,
+                }) => {
                     self.execute_render(&rfa_id, &context_json)
                         .map_err(|e| log::error!("Render error: {}", e))
                         .ok()
@@ -143,7 +150,9 @@ impl Worker {
             context_json = context_json
         );
 
-        let result = self.runtime.execute_script("<render>", deno_core::FastString::from(script))?;
+        let result = self
+            .runtime
+            .execute_script("<render>", deno_core::FastString::from(script))?;
         deno_core::scope!(scope, self.runtime);
         let local = v8::Local::new(scope, result);
         let output: String = serde_v8::from_v8(scope, local)?;
@@ -157,15 +166,12 @@ fn spawn_worker(admin_rx: Receiver<AdminCommand>, render_rx: Receiver<RenderRequ
     });
 }
 
-pub async fn render_page(
-    state: web::Data<AppState>,
-    req: HttpRequest,
-) -> HttpResponse {
+pub async fn render_page(state: web::Data<AppState>, req: HttpRequest) -> HttpResponse {
     let path = req.path();
     log::debug!("Render request: {}", path);
 
-    let page_config = match page::resolve_page(&state, path) {
-        Some(config) => config,
+    let resolved_page_config = match experiment::resolve_page_config(&state, &req) {
+        Some(resolved) => resolved,
         None => {
             log::warn!("Page not found: {}", path);
             return HttpResponse::NotFound()
@@ -173,6 +179,7 @@ pub async fn render_page(
                 .body("<h1>404 - Page not found</h1>");
         }
     };
+    let page_config = resolved_page_config.page_config;
 
     if page::resolve_rfa(&state, &page_config.rfa).is_none() {
         log::error!("RFA not found: {}", page_config.rfa);
@@ -192,25 +199,18 @@ pub async fn render_page(
         }
     };
 
-    let body = format!(
-        "{}",
-        rendered
-    );
+    let body = format!("{}", rendered);
 
-    let cookie = Cookie::build("experiment_welcome_message_test", "variant_a")
-     .path("/")
-     .http_only(true)
-     .same_site(SameSite::Lax)
-     .finish();
-
-    HttpResponse::Ok()
-        .content_type(page_config.content_type.clone())
-        .cookie(cookie)
-        .body(body)
+    let mut response = HttpResponse::Ok();
+    response.content_type(page_config.content_type.clone());
+    if let Some(cookie) = resolved_page_config.assignment_cookie {
+        response.cookie(cookie);
+    }
+    response.body(body)
 }
 
 pub async fn reset_config(state: web::Data<AppState>) {
-        state.render_pool.admin_senders.iter().for_each(|sender| {
-            sender.send(AdminCommand::ResetRfas).ok();
-        });       
+    state.render_pool.admin_senders.iter().for_each(|sender| {
+        sender.send(AdminCommand::ResetRfas).ok();
+    });
 }

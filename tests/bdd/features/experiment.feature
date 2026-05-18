@@ -103,7 +103,6 @@ Example: Experiment variant A assigned content
     When I request GET /index.html
     Then the response should contain "Rendered: Introduction is Hello dear Customer"
 
-    @WIP
     Example: Experiment variant B assigned content
      Given a registered page config:
       """

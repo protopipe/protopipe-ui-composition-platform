@@ -84,7 +84,10 @@ pub async fn register_page(
         template: config.template.clone(),
         rfa: config.rfa.clone(),
         timeout_ms: config.timeout_ms,
-        content_type: config.content_type.clone().unwrap_or_else(|| "text/html; charset=utf-8".into()),
+        content_type: config
+            .content_type
+            .clone()
+            .unwrap_or_else(|| "text/html; charset=utf-8".into()),
         data: config.data.clone().into_iter().collect(),
     };
 
@@ -122,7 +125,6 @@ pub async fn reset_config(state: web::Data<AppState>) {
         let mut rfas = state.rfas.lock().unwrap();
         rfas.clear();
     }
-    
 }
 
 pub async fn register_rfa(

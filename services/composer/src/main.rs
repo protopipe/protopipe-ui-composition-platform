@@ -2,17 +2,18 @@ use actix_web::{web, App};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+mod admin;
 mod contextloader;
+mod experiment;
 mod page;
 mod render;
-mod experiment;
-mod admin;
 
-pub use page::{DataValue, PageConfig, RFAConfig};
 pub use experiment::{ExperimentConfig, Variant};
+pub use page::{DataValue, PageConfig, RFAConfig};
 
 pub struct AppState {
     pub pages: Mutex<HashMap<String, PageConfig>>,
+    pub experiments: Mutex<HashMap<String, ExperimentConfig>>,
     pub rfas: Mutex<HashMap<String, RFAConfig>>,
     pub render_pool: render::RenderPool,
 }
@@ -28,6 +29,7 @@ async fn main() -> std::io::Result<()> {
     let render_pool = render::RenderPool::new(worker_count);
     let state = web::Data::new(AppState {
         pages: Mutex::new(HashMap::new()),
+        experiments: Mutex::new(HashMap::new()),
         rfas: Mutex::new(HashMap::new()),
         render_pool,
     });
@@ -39,17 +41,22 @@ async fn main() -> std::io::Result<()> {
     // Admin Server (Port 9000)
     let admin_state = state.clone();
     let admin_server = actix_web::HttpServer::new(move || {
-        App::new()
-            .app_data(admin_state.clone())
-            .service(
-                web::scope("/admin")
-                    .route("/health", web::get().to(admin::health))
-                    .route("/config", web::delete().to(admin::reset_config))
-                    .route("/config/pages", web::post().to(page::register_page))
-                    .route("/config/pages", web::get().to(page::get_pages))
-                    .route("/config/rfas", web::post().to(page::register_rfa))
-                    .route("/config/experiments", web::post().to(experiment::register_experiment))
-            )
+        App::new().app_data(admin_state.clone()).service(
+            web::scope("/admin")
+                .route("/health", web::get().to(admin::health))
+                .route("/config", web::delete().to(admin::reset_config))
+                .route("/config/pages", web::post().to(page::register_page))
+                .route("/config/pages", web::get().to(page::get_pages))
+                .route("/config/rfas", web::post().to(page::register_rfa))
+                .route(
+                    "/config/experiments",
+                    web::post().to(experiment::register_experiment),
+                )
+                .route(
+                    "/config/experiments",
+                    web::get().to(experiment::get_experiments),
+                ),
+        )
     })
     .bind("0.0.0.0:9000")?
     .run();
