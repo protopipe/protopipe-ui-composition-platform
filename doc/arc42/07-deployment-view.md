@@ -20,9 +20,17 @@ The platform is deployed as a set of Kubernetes resources:
 ### Message Bridge (optional)
 
 - Handles event-based interaction between frontend and backend (see [ADR-0014](../adr/0014-use-buffered-polling-based-event-delivery.md))
-- Buffers and delivers interaction events via polling
-- Routes events to business services
-- Stateless message routing
+- Publishes commands and interaction events via configured broker channels
+- Delivers response events to clients via polling
+- Selects configured channels from effective Page and Experiment configuration without performing experiment assignment (see [ADR-0015](../adr/0015-separate-experiment-assignment-from-interaction-channel-selection.md))
+- Persists accepted messages before acknowledgement through a durable broker such as RabbitMQ
+- Keeps Message Bridge service instances stateless; durable delivery state lives in the broker
+
+### Durable Message Broker (optional)
+
+- Provides durable queues, exchanges/topics, bindings, retries, and dead-letter queues for interaction delivery
+- Supports runtime topology changes for new Pages, IFAs, and Experiments
+- Performs technical message distribution; business validation remains with backend services
 
 ## Artifact Deployment
 
@@ -50,6 +58,6 @@ The platform is deployed as a set of Kubernetes resources:
 
 - Composer: Horizontally scalable (stateless)
 - Operator: Single instance (leader election for HA)
-- Message Bridge: Horizontally scalable (stateless)
+- Message Bridge: Horizontally scalable service instances with durable broker-backed delivery state
+- Durable Message Broker: Scaled and operated according to the selected broker technology
 - RFAs: Executed on-demand, isolated per request or batch
-

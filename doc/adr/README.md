@@ -29,6 +29,7 @@ together with the source code.
 - [ADR-0012: Define Interaction Event Lifecycle](0012-define-interaction-event-lifecyle.md)
 - [ADR-0013: Distinguish Render and Interactive UI Artifacts](0013-distinguish-render-and-interactive-ui-artifacts.md)
 - [ADR-0014: Use Buffered Polling-Based Event Delivery](0014-use-buffered-polling-based-event-delivery.md)
+- [ADR-0015: Separate Experiment Assignment from Interaction Channel Selection](0015-separate-experiment-assignment-from-interaction-channel-selection.md)
 
 ---
 
@@ -82,4 +83,3 @@ decisions.
 
 See:  
 `docs/arc42/09-architecture-decisions.md`
-

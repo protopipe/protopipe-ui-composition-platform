@@ -1,4 +1,4 @@
-Feature: Interaction event lifecycle
+Feature: Message Bridge interaction event lifecycle
   As a UI artifact owner,
   I want interaction events to move through explicit lifecycle states,
   so that optimistic UI behavior can be reconciled predictably.

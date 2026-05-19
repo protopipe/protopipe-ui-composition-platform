@@ -1,4 +1,4 @@
-Feature: Buffered polling-based interaction delivery
+Feature: Message Bridge buffered polling-based delivery
   As a platform operator,
   I want interaction events to be delivered through buffered polling,
   so that clients can tolerate offline periods without requiring push sockets.

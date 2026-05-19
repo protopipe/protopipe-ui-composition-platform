@@ -93,6 +93,7 @@
 - Assignment happens once per request
 - No variant branching logic inside RFAs
 - Event-based interaction model for state consistency
+- Interaction channel selection uses the Composer's authoritative assignment context (ADR-0015)
 
 ### Scenario 5: Compliance with Privacy Regulations
 
@@ -112,4 +113,5 @@
 - Contract enforcement (CDCT)
 - Platform-owned experimentation
 - Event-based interaction model for UI consistency
+- Broker-backed durable delivery for accepted interaction messages
 - Separation of observability and analytics concerns

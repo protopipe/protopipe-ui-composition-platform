@@ -36,7 +36,7 @@ Extend RFAs with client-side interaction capabilities (see [ADR-0013](../adr/001
 
 ## Event-Based Interaction Model
 
-See [ADR-0011](../adr/0011-use-event-based-interaction-model-for-ui-artifacts.md), [ADR-0012](../adr/0012-define-interaction-event-lifecyle.md) and [ADR-0014](../adr/0014-use-buffered-polling-based-event-delivery.md).
+See [ADR-0011](../adr/0011-use-event-based-interaction-model-for-ui-artifacts.md), [ADR-0012](../adr/0012-define-interaction-event-lifecyle.md), [ADR-0014](../adr/0014-use-buffered-polling-based-event-delivery.md), and [ADR-0015](../adr/0015-separate-experiment-assignment-from-interaction-channel-selection.md).
 
 ### Event Lifecycle
 
@@ -66,6 +66,9 @@ Buffered, polling-based event delivery (see [ADR-0014](../adr/0014-use-buffered-
 - Clients retrieve pending events via polling (`GET /messages`)
 - Push sockets are not required for frontend-backend communication
 - Supports offline clients and deferred delivery
+- The Composer remains authoritative for experiment assignment
+- The Message Bridge selects configured publish/consume channels from effective Page and Experiment configuration
+- Durable brokers such as RabbitMQ provide technical distribution through exchanges/topics, queues, and bindings
 
 ## Experimentation
 
@@ -117,4 +120,3 @@ See [ADR-0002](../adr/0002-model-pages-and-experiments-as-kubernetes-crds.md).
 - Limited context exposure.
 - No shared global state between artifacts.
 - Strong separation between components powered by event contracts
-
