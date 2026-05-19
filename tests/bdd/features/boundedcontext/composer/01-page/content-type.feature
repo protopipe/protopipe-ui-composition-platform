@@ -11,6 +11,7 @@ Feature: Page response content type
         {
           "path": "/my/shop/cart.fancy",
           "page_id": "cart-page",
+          "type": "rfa",
           "template": "cart-v1",
           "rfa": "cart-rfa",
           "timeout_ms": 3000,
@@ -37,6 +38,7 @@ Feature: Page response content type
         {
           "path": "/my/shop/cart.json",
           "page_id": "cart-page",
+          "type": "rfa",
           "template": "cart-v1",
           "rfa": "cart-json-rfa",
           "timeout_ms": 3000,

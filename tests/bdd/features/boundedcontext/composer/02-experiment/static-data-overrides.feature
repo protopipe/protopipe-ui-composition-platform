@@ -11,6 +11,7 @@ Feature: Experiment static data overrides
         {
           "path": "/index.html",
           "page_id": "landing",
+          "type": "rfa",
           "template": "cart-v1",
           "rfa": "cart-rfa",
           "timeout_ms": 3000,

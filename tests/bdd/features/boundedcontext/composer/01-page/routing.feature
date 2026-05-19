@@ -11,6 +11,7 @@ Feature: Page routing
         {
           "path": "/my/shop/cart.fancy",
           "page_id": "cart-page",
+          "type": "rfa",
           "template": "cart-v1",
           "rfa": "cart-rfa",
           "timeout_ms": 3000,
@@ -38,6 +39,7 @@ Feature: Page routing
         {
           "path": "/my/shop/*",
           "page_id": "generic-shop-page",
+          "type": "rfa",
           "template": "generic-shop-template",
           "rfa": "generic-shop-rfa",
           "timeout_ms": 3000,
@@ -54,6 +56,7 @@ Feature: Page routing
         {
           "path": "/my/shop/cart.fancy",
           "page_id": "cart-page",
+          "type": "rfa",
           "template": "cart-v1",
           "rfa": "cart-rfa",
           "timeout_ms": 3000,

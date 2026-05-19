@@ -37,20 +37,25 @@ pub struct Variant {
 
 #[derive(Clone, Default)]
 pub struct PageOverrides {
+    pub page_type: Option<page::PageType>,
     pub template: Option<String>,
     pub rfa: Option<String>,
     pub timeout_ms: Option<u64>,
     pub content_type: Option<String>,
     pub data: Option<HashMap<String, page::DataValue>>,
+    pub interaction: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct PageOverridesDto {
+    #[serde(rename = "type")]
+    pub page_type: Option<page::PageType>,
     pub template: Option<String>,
     pub rfa: Option<String>,
     pub timeout_ms: Option<u64>,
     pub content_type: Option<String>,
     pub data: Option<HashMap<String, page::DataValue>>,
+    pub interaction: Option<serde_json::Value>,
 }
 
 pub struct ResolvedPageConfig {
@@ -212,11 +217,13 @@ fn expire_experiment_cookie(cookie_name: &str) -> Cookie<'static> {
 impl From<PageOverridesDto> for PageOverrides {
     fn from(value: PageOverridesDto) -> Self {
         Self {
+            page_type: value.page_type,
             template: value.template,
             rfa: value.rfa,
             timeout_ms: value.timeout_ms,
             content_type: value.content_type,
             data: value.data,
+            interaction: value.interaction,
         }
     }
 }
@@ -224,16 +231,22 @@ impl From<PageOverridesDto> for PageOverrides {
 impl From<PageOverrides> for PageOverridesDto {
     fn from(value: PageOverrides) -> Self {
         Self {
+            page_type: value.page_type,
             template: value.template,
             rfa: value.rfa,
             timeout_ms: value.timeout_ms,
             content_type: value.content_type,
             data: value.data,
+            interaction: value.interaction,
         }
     }
 }
 
 fn apply_overrides(page_config: &mut page::PageConfig, overrides: &PageOverrides) {
+    if let Some(page_type) = &overrides.page_type {
+        page_config.page_type = page_type.clone();
+    }
+
     if let Some(template) = &overrides.template {
         page_config.template = template.clone();
     }
@@ -254,6 +267,10 @@ fn apply_overrides(page_config: &mut page::PageConfig, overrides: &PageOverrides
         for (key, value) in data {
             page_config.data.insert(key.clone(), value.clone());
         }
+    }
+
+    if let Some(interaction) = &overrides.interaction {
+        page_config.interaction = Some(interaction.clone());
     }
 }
 

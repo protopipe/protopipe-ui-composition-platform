@@ -181,6 +181,13 @@ pub async fn render_page(state: web::Data<AppState>, req: HttpRequest) -> HttpRe
     };
     let page_config = resolved_page_config.page_config;
 
+    if let Err(message) = page::validate_page_config(&page_config) {
+        log::error!("Invalid page config for {}: {}", page_config.path, message);
+        return HttpResponse::InternalServerError()
+            .content_type("text/plain; charset=utf-8")
+            .body(format!("Invalid page config: {}", message));
+    }
+
     if page::resolve_rfa(&state, &page_config.rfa).is_none() {
         log::error!("RFA not found: {}", page_config.rfa);
         return HttpResponse::InternalServerError()

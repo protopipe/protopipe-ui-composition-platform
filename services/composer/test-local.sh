@@ -21,6 +21,7 @@ curl -s -X POST http://localhost:9000/admin/config/pages \
   -d '{
     "path": "/shop/cart",
     "page_id": "cart-page",
+    "type": "rfa",
     "template": "cart-v1",
     "rfa": "cart-rfa",
     "timeout_ms": 3000,

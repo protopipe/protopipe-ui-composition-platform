@@ -11,6 +11,7 @@ Feature: Server-side page composition
         {
           "path": "/my/shop/cart.fancy",
           "page_id": "cart-page",
+          "type": "rfa",
           "template": "cart-v1",
           "rfa": "cart-rfa",
           "timeout_ms": 3000,

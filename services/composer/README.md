@@ -24,6 +24,7 @@ curl -X POST http://localhost:9000/admin/config/pages \
   -d '{
     "path": "/my/page",
     "page_id": "test-page",
+    "type": "rfa",
     "template": "test-template",
     "rfa": "test-rfa",
     "timeout_ms": 3000,
@@ -63,6 +64,7 @@ curl -X POST http://localhost:9000/admin/config/pages \
   -d '{
     "path": "/shop/cart",
     "page_id": "cart-page",
+    "type": "rfa",
     "template": "cart-v1",
     "rfa": "cart-rfa",
     "timeout_ms": 3000,

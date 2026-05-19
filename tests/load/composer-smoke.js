@@ -27,6 +27,7 @@ export function setup() {
   const pagePayload = {
     path: pagePath,
     page_id: "smoke-page",
+    type: "rfa",
     template: "smoke",
     rfa: rfaId,
     timeout_ms: 1000,
