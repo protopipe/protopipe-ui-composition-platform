@@ -34,9 +34,9 @@ Extend RFAs with client-side interaction capabilities (see [ADR-0013](../adr/001
 - MAY consume interaction and business events
 - MUST NOT emit business events
 
-## Event-Based Interaction Model
+## Message Bridge and Event-Based Interaction Model
 
-See [ADR-0011](../adr/0011-use-event-based-interaction-model-for-ui-artifacts.md), [ADR-0012](../adr/0012-define-interaction-event-lifecyle.md), [ADR-0014](../adr/0014-use-buffered-polling-based-event-delivery.md), and [ADR-0015](../adr/0015-separate-experiment-assignment-from-interaction-channel-selection.md).
+See [ADR-0011](../adr/0011-use-event-based-interaction-model-for-ui-artifacts.md), [ADR-0012](../adr/0012-define-interaction-event-lifecyle.md), [ADR-0014](../adr/0014-use-buffered-polling-based-event-delivery.md), [ADR-0015](../adr/0015-separate-experiment-assignment-from-interaction-channel-selection.md), [ADR-0016](../adr/0016-define-message-bridge-instances-and-chaining.md), [ADR-0017](../adr/0017-use-buffered-http-batch-delivery-for-message-bridges.md), [ADR-0018](../adr/0018-use-internal-brokers-and-governed-business-event-sourcing.md), and [ADR-0019](../adr/0019-use-state-carrying-business-events-for-shadow-and-experiment-services.md).
 
 ### Event Lifecycle
 
@@ -55,8 +55,15 @@ Observed → Buffered → Delivered → Processed → Resolved
 ### Event Types
 
 - **Interaction Events**: Emitted by UI artifacts (represent user interaction or UI intent)
+- **Response Events**: Emitted by services or bridges to resolve a previous interaction through a correlation identifier
 - **Business Events**: Emitted by backend services (represent validated business state)
 - **Technical Events**: Emitted by infrastructure (transport, validation, failure)
+
+### Message Bridge Profiles
+
+- **Client-side Message Bridge**: Runs in the browser or PWA, buffers observed interaction events locally when needed, propagates authentication context, synchronizes batches upstream, and reconciles response events.
+- **Server-side Message Bridge**: Acts as policy gate, durable delivery endpoint, channel resolver, and internal integration adapter.
+- **Edge Message Bridge**: Buffers and forwards events for local networks, field usage, constrained connectivity, or bridge chaining.
 
 ### Delivery Mechanism
 
@@ -68,7 +75,23 @@ Buffered, polling-based event delivery (see [ADR-0014](../adr/0014-use-buffered-
 - Supports offline clients and deferred delivery
 - The Composer remains authoritative for experiment assignment
 - The Message Bridge selects configured publish/consume channels from effective Page and Experiment configuration
-- Durable brokers such as RabbitMQ provide technical distribution through exchanges/topics, queues, and bindings
+- Service and bridge consumers receive buffered HTTP batches by default
+- Batches are committed only after acknowledgement; delivery is at-least-once
+- Consumers may request cursor-based replay when the stream supports retention or sourcing
+- Durable brokers such as RabbitMQ provide internal buffering, retry, dead-lettering, and outbox/inbox processing
+- Kafka or compatible event-log technology may provide optional sourcing for configured business-event streams
+
+### Governed Business Events
+
+- Business events use typed schemas.
+- Every payload property must declare its sensitivity and disclosure rules.
+- State-changing business events carry version information.
+- Business events carry the state required by their intended consumers; consumers do not depend on follow-up domain-service reads to interpret the event.
+- Consumers are registered with trust level, scopes, batch limits, and replay permissions.
+- The Message Bridge performs field-level redaction during delivery.
+- Events are not removed from a consumer sequence only because payload fields are hidden; the cursor and required envelope metadata remain visible.
+- If a consumer may not read any payload fields, the event is delivered with an empty payload object.
+- Shadow and experiment services synchronize from business-object event streams before they are activated for traffic.
 
 ## Experimentation
 

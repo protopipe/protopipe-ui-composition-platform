@@ -4,6 +4,16 @@ x-composer-env: &composer-env
   RUST_LOG: info
 
 services:
+  rabbitmq:
+    image: docker.io/library/rabbitmq:3.13-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    profiles:
+      - dev
+      - test
+      - ci
+
   composer:
     build:
       context: ./services/composer
@@ -55,6 +65,63 @@ services:
       - load
       - ci
 
+  message-worker-mock:
+    build:
+      context: ./services/message-worker-mock
+      dockerfile: Dockerfile
+    environment:
+      RUST_LOG: info
+      MESSAGE_WORKER_MOCK_AMQP_URL: amqp://guest:guest@rabbitmq:5672/%2f
+      MESSAGE_WORKER_MOCK_QUEUES: protopipe.commands
+      MESSAGE_WORKER_MOCK_BINDINGS: "protopipe.commands:protopipe.commands:#"
+    ports:
+      - "9100:9100"
+    depends_on:
+      - rabbitmq
+    profiles:
+      - dev
+      - test
+      - ci
+
+  messagebridge:
+    build:
+      context: ./services/messagebridge
+      dockerfile: Dockerfile
+    environment:
+      RUST_LOG: info
+      MESSAGEBRIDGE_AMQP_URL: amqp://guest:guest@rabbitmq:5672/%2f
+    ports:
+      - "8082:8082"
+    depends_on:
+      - rabbitmq
+    profiles:
+      - test
+      - ci
+
+  messagebridge-dev:
+    build:
+      context: ./services/messagebridge
+      dockerfile: Dockerfile
+      target: dev
+    working_dir: /app
+    volumes:
+      - ./services/messagebridge:/app
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+    environment:
+      RUST_LOG: debug
+      MESSAGEBRIDGE_AMQP_URL: amqp://guest:guest@rabbitmq:5672/%2f
+    command:
+      - bacon
+      - --headless
+      - run-long
+    ports:
+      - "8082:8082"
+    depends_on:
+      - rabbitmq
+    profiles:
+      - dev
+
   bdd-dev:
     image: rust:1.95-bookworm
     working_dir: /workspace
@@ -66,6 +133,8 @@ services:
     environment:
       COMPOSER_BASE_URL: http://composer-dev
       COMPOSER_ADMIN_URL: http://composer-dev
+      MESSAGEBRIDGE_URL: http://messagebridge-dev:8082
+      MESSAGE_WORKER_MOCK_URL: http://message-worker-mock:9100
       CUCUMBER_FEATURES: /workspace/tests/bdd/features
       TERM: xterm-256color
     entrypoint: ["cargo", "test", "--manifest-path", "tests/bdd/Cargo.toml", "--test", "cucumber", "--", "-vvv"]
@@ -74,6 +143,8 @@ services:
       - '@WIP'
     depends_on:
       - composer-dev
+      - messagebridge-dev
+      - message-worker-mock
       - wiremock
     profiles:
       - dev
@@ -83,9 +154,14 @@ services:
     working_dir: /workspace
     volumes:
       - .:/workspace:Z
+      - bdd-target:/workspace/tests/bdd/target
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
     environment:
       COMPOSER_BASE_URL: http://composer
       COMPOSER_ADMIN_URL: http://composer
+      MESSAGEBRIDGE_URL: http://messagebridge:8082
+      MESSAGE_WORKER_MOCK_URL: http://message-worker-mock:9100
       CUCUMBER_FEATURES: /workspace/tests/bdd/features
     command:
       - cargo
@@ -100,6 +176,8 @@ services:
       - not @WIP
     depends_on:
       - composer
+      - messagebridge
+      - message-worker-mock
       - wiremock
     profiles:
       - test

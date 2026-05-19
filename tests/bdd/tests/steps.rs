@@ -11,6 +11,8 @@ pub struct ComposerWorld {
     pub client: Option<reqwest::Client>,
     pub base_url: String,
     pub admin_url: String,
+    pub messagebridge_url: String,
+    pub message_worker_mock_url: String,
     pub last_response: Option<String>,
     pub last_status: Option<u16>,
     pub last_headers: Option<reqwest::header::HeaderMap>,
@@ -24,6 +26,10 @@ impl ComposerWorld {
         let base_url =
             env::var("COMPOSER_BASE_URL").unwrap_or_else(|_| "http://localhost".to_string());
         let admin_url = env::var("COMPOSER_ADMIN_URL").unwrap_or_else(|_| base_url.clone());
+        let messagebridge_url =
+            env::var("MESSAGEBRIDGE_URL").unwrap_or_else(|_| "http://localhost:8082".to_string());
+        let message_worker_mock_url = env::var("MESSAGE_WORKER_MOCK_URL")
+            .unwrap_or_else(|_| "http://localhost:9100".to_string());
 
         Self {
             client: Some(
@@ -34,6 +40,8 @@ impl ComposerWorld {
             ),
             base_url,
             admin_url,
+            messagebridge_url,
+            message_worker_mock_url,
             last_response: None,
             last_status: None,
             last_headers: None,
@@ -60,6 +68,69 @@ impl ComposerWorld {
             response.unwrap().status()
         );
 
+        wait_for_http(
+            self.client.as_ref().unwrap(),
+            &format!("{}/health", self.messagebridge_url),
+        )
+        .await;
+
+        let messagebridge_reset_url = format!("{}/admin/config", self.messagebridge_url);
+        let messagebridge_response = self
+            .client
+            .as_ref()
+            .unwrap()
+            .delete(&messagebridge_reset_url)
+            .send()
+            .await;
+        log::info!(
+            "Cleanup: Sent DELETE request to {}, {}",
+            messagebridge_reset_url,
+            messagebridge_response.unwrap().status()
+        );
+
+        let worker_health_url = format!("{}/health", self.message_worker_mock_url);
+        let worker_reset_url = format!("{}/processed", self.message_worker_mock_url);
+        match self
+            .client
+            .as_ref()
+            .unwrap()
+            .get(&worker_health_url)
+            .send()
+            .await
+        {
+            Ok(response) if response.status().is_success() => {
+                let worker_response = self
+                    .client
+                    .as_ref()
+                    .unwrap()
+                    .delete(&worker_reset_url)
+                    .send()
+                    .await;
+                match worker_response {
+                    Ok(response) => log::info!(
+                        "Cleanup: Sent DELETE request to {}, {}",
+                        worker_reset_url,
+                        response.status()
+                    ),
+                    Err(error) => log::warn!(
+                        "Cleanup: Could not reset optional message worker mock at {}: {}",
+                        worker_reset_url,
+                        error
+                    ),
+                }
+            }
+            Ok(response) => log::warn!(
+                "Cleanup: Optional message worker mock at {} returned {}",
+                worker_health_url,
+                response.status()
+            ),
+            Err(error) => log::warn!(
+                "Cleanup: Optional message worker mock at {} is not reachable: {}",
+                worker_health_url,
+                error
+            ),
+        }
+
         self.last_response = None;
         self.last_status = None;
         self.page_config.clear();
@@ -80,6 +151,76 @@ async fn wait_for_http(client: &reqwest::Client, url: &str) {
     }
 
     panic!("service at {url} did not become ready: {last_error:?}");
+}
+
+#[given(regex = r"^a registered IFA message channel:$")]
+async fn register_ifa_message_channel(world: &mut ComposerWorld, step: &GherkinStep) {
+    let docstring = step
+        .docstring()
+        .expect("Expected docstring for IFA message channel");
+    let payload: serde_json::Value =
+        serde_json::from_str(docstring).expect("Invalid JSON in IFA message channel docstring");
+
+    let url = format!("{}/admin/config/ifas", world.messagebridge_url);
+    let response = world
+        .client
+        .as_ref()
+        .unwrap()
+        .post(&url)
+        .json(&payload)
+        .send()
+        .await;
+
+    match response {
+        Ok(resp) => {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_else(|_| "no body".to_string());
+            assert!(
+                status.is_success(),
+                "Failed to register IFA message channel. Status: {}, Response: {}",
+                status,
+                body
+            );
+        }
+        Err(e) => {
+            panic!(
+                "Failed to register IFA message channel at {}. Error: {}",
+                url, e
+            );
+        }
+    }
+}
+
+#[when(regex = r"^the frontend emits an interaction event:$")]
+async fn frontend_emits_interaction_event(world: &mut ComposerWorld, step: &GherkinStep) {
+    let docstring = step
+        .docstring()
+        .expect("Expected docstring for interaction event");
+    let payload: serde_json::Value =
+        serde_json::from_str(docstring).expect("Invalid JSON in interaction event docstring");
+
+    let url = format!("{}/messages", world.messagebridge_url);
+    let response = world
+        .client
+        .as_ref()
+        .unwrap()
+        .post(&url)
+        .json(&payload)
+        .send()
+        .await;
+
+    match response {
+        Ok(resp) => {
+            world.last_status = Some(resp.status().as_u16());
+            world.last_headers = Some(resp.headers().clone());
+            world.last_response = Some(resp.text().await.unwrap_or_default());
+        }
+        Err(e) => {
+            world.last_status = Some(0);
+            world.last_response = Some(format!("Error: {}", e));
+            panic!("Failed to emit interaction event at {}. Error: {}", url, e);
+        }
+    }
 }
 
 #[given(regex = r"^a registered page config:$")]
@@ -117,6 +258,50 @@ async fn register_page_config(world: &mut ComposerWorld, step: &GherkinStep) {
             panic!("Failed to register page config at {}. Error: {}", url, e);
         }
     }
+}
+
+#[then(regex = r#"^the worker mock should have processed message "([^"]*)" on queue "([^"]*)"$"#)]
+async fn worker_mock_should_have_processed_message(
+    world: &mut ComposerWorld,
+    expected_message_name: String,
+    expected_queue: String,
+) {
+    let url = format!("{}/processed", world.message_worker_mock_url);
+    let client = world.client.as_ref().unwrap();
+
+    let mut last_body = serde_json::Value::Null;
+    for _ in 0..40 {
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .expect("Failed to query message worker mock");
+        let body = response
+            .json::<serde_json::Value>()
+            .await
+            .expect("Message worker mock returned invalid JSON");
+        last_body = body.clone();
+
+        if body.as_array().is_some_and(|messages| {
+            messages.iter().any(|message| {
+                message.get("queue").and_then(|value| value.as_str())
+                    == Some(expected_queue.as_str())
+                    && message.get("message_name").and_then(|value| value.as_str())
+                        == Some(expected_message_name.as_str())
+            })
+        }) {
+            return;
+        }
+
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+
+    panic!(
+        "Expected worker mock to process message '{}' on queue '{}'. Last processed messages: {}",
+        expected_message_name,
+        expected_queue,
+        serde_json::to_string_pretty(&last_body).unwrap_or_else(|_| last_body.to_string())
+    );
 }
 
 #[given(regex = r#"^a registered experiment:$"#)]

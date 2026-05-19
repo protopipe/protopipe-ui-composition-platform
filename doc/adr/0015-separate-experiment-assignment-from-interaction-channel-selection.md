@@ -78,7 +78,7 @@ response event               -> consume queue/topic/cursor
 technical event              -> observe or deliver failure state
 ```
 
-Broker technology, initially RabbitMQ for the Durchstich, is responsible for
+Broker technology, initially RabbitMQ for the vertical slice, is responsible for
 technical message distribution through exchanges, topics, queues, bindings,
 retry queues, and dead-letter queues.
 
@@ -97,7 +97,7 @@ Configuration ownership is declarative:
   - broker topology.
 
 Until CRDs are implemented, the same separation is represented in the JSON page
-configuration used by the Durchstich.
+configuration used by the vertical slice.
 
 ## Consequences
 

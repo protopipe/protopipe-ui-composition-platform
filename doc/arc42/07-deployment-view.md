@@ -20,17 +20,21 @@ The platform is deployed as a set of Kubernetes resources:
 ### Message Bridge (optional)
 
 - Handles event-based interaction between frontend and backend (see [ADR-0014](../adr/0014-use-buffered-polling-based-event-delivery.md))
-- Publishes commands and interaction events via configured broker channels
-- Delivers response events to clients via polling
+- Exists as client-side, server-side, and edge bridge profiles that share a common protocol model (see [ADR-0016](../adr/0016-define-message-bridge-instances-and-chaining.md))
+- Publishes commands and interaction events via configured channels
+- Delivers response events to clients via polling and delivers service/bridge batches via buffered HTTP webhooks (see [ADR-0017](../adr/0017-use-buffered-http-batch-delivery-for-message-bridges.md))
 - Selects configured channels from effective Page and Experiment configuration without performing experiment assignment (see [ADR-0015](../adr/0015-separate-experiment-assignment-from-interaction-channel-selection.md))
-- Persists accepted messages before acknowledgement through a durable broker such as RabbitMQ
-- Keeps Message Bridge service instances stateless; durable delivery state lives in the broker
+- Uses internal brokers such as RabbitMQ for buffering, retry, dead-lettering, and outbox/inbox processing
+- May use Kafka or compatible event-log technology for configured business-event sourcing (see [ADR-0018](../adr/0018-use-internal-brokers-and-governed-business-event-sourcing.md))
+- Keeps public consumers independent from broker-specific protocols
 
 ### Durable Message Broker (optional)
 
 - Provides durable queues, exchanges/topics, bindings, retries, and dead-letter queues for interaction delivery
 - Supports runtime topology changes for new Pages, IFAs, and Experiments
-- Performs technical message distribution; business validation remains with backend services
+- Acts as internal Message Bridge infrastructure rather than the public consumer contract
+- May provide event-log storage for sourced business-event streams
+- Performs technical message persistence and distribution; business validation remains with backend services
 
 ## Artifact Deployment
 

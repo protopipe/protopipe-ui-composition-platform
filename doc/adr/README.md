@@ -30,6 +30,10 @@ together with the source code.
 - [ADR-0013: Distinguish Render and Interactive UI Artifacts](0013-distinguish-render-and-interactive-ui-artifacts.md)
 - [ADR-0014: Use Buffered Polling-Based Event Delivery](0014-use-buffered-polling-based-event-delivery.md)
 - [ADR-0015: Separate Experiment Assignment from Interaction Channel Selection](0015-separate-experiment-assignment-from-interaction-channel-selection.md)
+- [ADR-0016: Define Message Bridge Instances and Chaining](0016-define-message-bridge-instances-and-chaining.md)
+- [ADR-0017: Use Buffered HTTP Batch Delivery for Message Bridges](0017-use-buffered-http-batch-delivery-for-message-bridges.md)
+- [ADR-0018: Use Internal Brokers and Governed Business Event Sourcing](0018-use-internal-brokers-and-governed-business-event-sourcing.md)
+- [ADR-0019: Use State-Carrying Business Events for Shadow and Experiment Services](0019-use-state-carrying-business-events-for-shadow-and-experiment-services.md)
 
 ---
 
