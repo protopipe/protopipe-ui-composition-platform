@@ -3,7 +3,6 @@ use actix_web::{web, HttpRequest, HttpResponse};
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use deno_core::{error::AnyError, serde_v8, v8, JsRuntime, RuntimeOptions};
 use serde_json::Value;
-use std::collections::HashMap;
 use tokio::sync::oneshot;
 
 pub struct RenderPool {
@@ -59,7 +58,7 @@ impl RenderPool {
         &self,
         rfa_id: &str,
         context: &Value,
-        rfa_replacements: &HashMap<String, String>,
+        rfa_replacements: &[experiment::RfaReplacement],
     ) -> Result<String, AnyError> {
         let (tx, rx) = oneshot::channel();
         let request = RenderRequest::Render {
@@ -155,17 +154,47 @@ impl Worker {
             r#"
 (function() {{
     const render = globalThis.rfaRegistry[{rfa_id}];
+    const rootRfaId = {rfa_id};
     const context = JSON.parse({context_json:?});
+    if (context.namespace === undefined || context.namespace === null || context.namespace === "") {{
+        context.namespace = rootRfaId;
+    }}
     const rfaReplacements = JSON.parse({rfa_replacements_json:?});
+    const namespaceMatches = function(pattern, namespace) {{
+        if (pattern === undefined || pattern === null || pattern === "") {{
+            return true;
+        }}
+        if (pattern === namespace) {{
+            return true;
+        }}
+        if (pattern.endsWith(".*")) {{
+            const prefix = pattern.slice(0, -2);
+            return namespace.startsWith(prefix + ".");
+        }}
+        return false;
+    }};
+    const resolvePartialId = function(partialId, namespace) {{
+        const replacement = rfaReplacements.find(function(candidate) {{
+            return candidate.old === partialId && namespaceMatches(candidate.namespace, namespace);
+        }});
+        return replacement === undefined ? partialId : replacement.new;
+    }};
     const partials = {{
         include: function(partialId, partialContext) {{
-            const resolvedPartialId = rfaReplacements[partialId] || partialId;
+            const baseContext = partialContext === undefined ? context : partialContext;
+            const baseNamespace =
+                typeof baseContext.namespace === "string" && baseContext.namespace.length > 0
+                    ? baseContext.namespace
+                    : rootRfaId;
+            const partialNamespace = baseNamespace + "." + partialId;
+            const resolvedPartialId = resolvePartialId(partialId, partialNamespace);
             const partial = globalThis.rfaRegistry[resolvedPartialId];
             if (typeof partial !== "function") {{
                 throw new Error("RFA not found: " + resolvedPartialId);
             }}
 
-            const output = partial(partialContext === undefined ? context : partialContext, partials);
+            const scopedContext = Object.assign({{}}, baseContext, {{ namespace: partialNamespace }});
+            const output = partial(scopedContext, partials);
             return typeof output === "string" ? output : JSON.stringify(output);
         }}
     }};

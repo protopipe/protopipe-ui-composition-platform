@@ -12,12 +12,14 @@ const EXPERIMENT_COOKIE_CONSENT: &str = "pp_xa_allowd";
 #[derive(Clone)]
 pub struct ExperimentConfig {
     pub id: String,
+    pub scope: ExperimentScope,
     pub variants: Vec<Variant>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct ExperimentConfigDto {
     pub experiment_id: String,
+    pub scope: Option<ExperimentScope>,
     pub variants: Vec<VariantDto>,
 }
 
@@ -53,6 +55,19 @@ pub enum RfaOverride {
     Replace { old: String, new: String },
 }
 
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+pub struct ExperimentScope {
+    pub path: Option<String>,
+    pub namespace: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RfaReplacement {
+    pub old: String,
+    pub new: String,
+    pub namespace: Option<String>,
+}
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct PageOverridesDto {
     #[serde(rename = "type")]
@@ -67,7 +82,7 @@ pub struct PageOverridesDto {
 
 pub struct ResolvedPageConfig {
     pub page_config: page::PageConfig,
-    pub rfa_replacements: HashMap<String, String>,
+    pub rfa_replacements: Vec<RfaReplacement>,
     pub assignment_cookie: Option<Cookie<'static>>,
 }
 
@@ -82,7 +97,7 @@ pub fn resolve_page_config(
 ) -> Option<ResolvedPageConfig> {
     let path = req.path();
     let mut page_config = page::resolve_page(state, path)?;
-    let mut rfa_replacements = HashMap::new();
+    let mut rfa_replacements = Vec::new();
     let mut assignment_cookie = None;
 
     let experiments = state.experiments.lock().unwrap();
@@ -94,10 +109,15 @@ pub fn resolve_page_config(
             break;
         }
 
+        if !experiment_applies_to_request(experiment, req, &page_config) {
+            continue;
+        }
+
         if let Some(assignment) = determine_variant(experiment, req, &cookie_name) {
             apply_overrides(
                 &mut page_config,
                 &mut rfa_replacements,
+                &experiment.scope,
                 &assignment.variant.overrides,
             );
 
@@ -128,6 +148,7 @@ pub async fn register_experiment(
 ) -> HttpResponse {
     let experiment = ExperimentConfig {
         id: config.experiment_id.clone(),
+        scope: config.scope.clone().unwrap_or_default(),
         variants: config
             .variants
             .iter()
@@ -152,6 +173,7 @@ pub async fn get_experiments(state: web::Data<AppState>) -> HttpResponse {
         .values()
         .map(|experiment| ExperimentConfigDto {
             experiment_id: experiment.id.clone(),
+            scope: Some(experiment.scope.clone()),
             variants: experiment
                 .variants
                 .iter()
@@ -219,6 +241,27 @@ fn should_delete_experiment_cookie(req: &HttpRequest, cookie_name: &str) -> bool
     !has_experiment_cookie_consent(req) && req.cookie(cookie_name).is_some()
 }
 
+fn experiment_applies_to_request(
+    experiment: &ExperimentConfig,
+    req: &HttpRequest,
+    page_config: &page::PageConfig,
+) -> bool {
+    let path_matches = experiment
+        .scope
+        .path
+        .as_ref()
+        .map_or(true, |path| path_matches(path, req.path()));
+    let namespace_matches = experiment
+        .scope
+        .namespace
+        .as_ref()
+        .map_or(true, |namespace| {
+            namespace_can_apply_to_page(namespace, &page_config.rfa)
+        });
+
+    path_matches && namespace_matches
+}
+
 fn expire_experiment_cookie(cookie_name: &str) -> Cookie<'static> {
     Cookie::build(cookie_name.to_string(), "")
         .path("/")
@@ -258,7 +301,8 @@ impl From<PageOverrides> for PageOverridesDto {
 
 fn apply_overrides(
     page_config: &mut page::PageConfig,
-    rfa_replacements: &mut HashMap<String, String>,
+    rfa_replacements: &mut Vec<RfaReplacement>,
+    experiment_scope: &ExperimentScope,
     overrides: &PageOverrides,
 ) {
     if let Some(page_type) = &overrides.page_type {
@@ -273,8 +317,19 @@ fn apply_overrides(
         match rfa {
             RfaOverride::Direct(rfa) => page_config.rfa = rfa.clone(),
             RfaOverride::Replace { old, new } => {
-                rfa_replacements.insert(old.clone(), new.clone());
-                if page_config.rfa == *old {
+                rfa_replacements.push(RfaReplacement {
+                    old: old.clone(),
+                    new: new.clone(),
+                    namespace: experiment_scope.namespace.clone(),
+                });
+                if page_config.rfa == *old
+                    && experiment_scope
+                        .namespace
+                        .as_ref()
+                        .map_or(true, |namespace| {
+                            namespace_matches(namespace, &page_config.rfa)
+                        })
+                {
                     page_config.rfa = new.clone();
                 }
             }
@@ -302,4 +357,217 @@ fn apply_overrides(
 
 fn experiment_cookie_name(experiment_id: &str) -> String {
     format!("pp_experiment_{}", experiment_id)
+}
+
+fn namespace_matches(pattern: &str, namespace: &str) -> bool {
+    if pattern == namespace {
+        return true;
+    }
+
+    pattern
+        .strip_suffix(".*")
+        .is_some_and(|prefix| namespace.starts_with(&format!("{prefix}.")))
+}
+
+fn path_matches(pattern: &str, path: &str) -> bool {
+    wildcard_matches(pattern, path)
+}
+
+fn wildcard_matches(pattern: &str, value: &str) -> bool {
+    if pattern == "*" || pattern == value {
+        return true;
+    }
+
+    if !pattern.contains('*') {
+        return false;
+    }
+
+    let parts: Vec<&str> = pattern.split('*').collect();
+    let mut rest = value;
+
+    if let Some(first) = parts.first().filter(|first| !first.is_empty()) {
+        let Some(stripped) = rest.strip_prefix(first) else {
+            return false;
+        };
+        rest = stripped;
+    }
+
+    for part in parts.iter().skip(1).take(parts.len().saturating_sub(2)) {
+        if part.is_empty() {
+            continue;
+        }
+
+        let Some(index) = rest.find(part) else {
+            return false;
+        };
+        rest = &rest[index + part.len()..];
+    }
+
+    if let Some(last) = parts.last().filter(|last| !last.is_empty()) {
+        rest.ends_with(last)
+    } else {
+        true
+    }
+}
+
+fn namespace_can_apply_to_page(pattern: &str, root_namespace: &str) -> bool {
+    if pattern == root_namespace || pattern.starts_with(&format!("{root_namespace}.")) {
+        return true;
+    }
+
+    pattern.strip_suffix(".*").is_some_and(|prefix| {
+        prefix == root_namespace || prefix.starts_with(&format!("{root_namespace}."))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn experiment_with_scope(path: Option<&str>, namespace: Option<&str>) -> ExperimentConfig {
+        ExperimentConfig {
+            id: "experiment".to_string(),
+            scope: ExperimentScope {
+                path: path.map(ToOwned::to_owned),
+                namespace: namespace.map(ToOwned::to_owned),
+            },
+            variants: Vec::new(),
+        }
+    }
+
+    fn test_page_config(path: &str, rfa: &str) -> page::PageConfig {
+        page::PageConfig {
+            path: path.to_string(),
+            page_id: "page".to_string(),
+            page_type: page::PageType::Rfa,
+            template: "template".to_string(),
+            rfa: rfa.to_string(),
+            timeout_ms: 3000,
+            content_type: "text/html; charset=utf-8".to_string(),
+            data: HashMap::new(),
+            interaction: None,
+        }
+    }
+
+    fn test_request(path: &str) -> HttpRequest {
+        actix_web::test::TestRequest::with_uri(path).to_http_request()
+    }
+
+    #[test]
+    fn experiment_without_scope_applies_to_any_request() {
+        let experiment = experiment_with_scope(None, None);
+        let page_config = test_page_config("/index.html", "p_landing_v1");
+        let request = test_request("/index.html");
+
+        assert!(experiment_applies_to_request(
+            &experiment,
+            &request,
+            &page_config
+        ));
+    }
+
+    #[test]
+    fn experiment_with_matching_path_scope_applies_to_request() {
+        let experiment = experiment_with_scope(Some("/index.html"), None);
+        let page_config = test_page_config("/index.html", "p_landing_v1");
+        let request = test_request("/index.html");
+
+        assert!(experiment_applies_to_request(
+            &experiment,
+            &request,
+            &page_config
+        ));
+    }
+
+    #[test]
+    fn experiment_with_prefix_wildcard_path_scope_does_apply_to_request() {
+        let experiment = experiment_with_scope(Some("/experiment/*"), None);
+        let page_config = test_page_config("/experiment/index.html", "p_landing_v1");
+        let request = test_request("/experiment/index.html");
+
+        assert!(experiment_applies_to_request(
+            &experiment,
+            &request,
+            &page_config
+        ));
+    }
+
+    #[test]
+    fn experiment_with_infix_wildcard_path_scope_does_apply_to_request() {
+        let experiment = experiment_with_scope(Some("/shop/*/index.html"), None);
+        let page_config = test_page_config("/shop/some/folders/index.html", "p_landing_v1");
+        let request = test_request("/shop/some/folders/index.html");
+
+        assert!(experiment_applies_to_request(
+            &experiment,
+            &request,
+            &page_config
+        ));
+    }
+
+    #[test]
+    fn experiment_with_different_path_scope_does_not_apply_to_request() {
+        let experiment = experiment_with_scope(Some("/index.html"), None);
+        let page_config = test_page_config("/other.html", "p_landing_v1");
+        let request = test_request("/other.html");
+
+        assert!(!experiment_applies_to_request(
+            &experiment,
+            &request,
+            &page_config
+        ));
+    }
+
+    #[test]
+    fn experiment_with_namespace_scope_applies_to_matching_root_rfa() {
+        let experiment = experiment_with_scope(None, Some("p_landing_v1.*"));
+        let page_config = test_page_config("/index.html", "p_landing_v1");
+        let request = test_request("/index.html");
+
+        assert!(experiment_applies_to_request(
+            &experiment,
+            &request,
+            &page_config
+        ));
+    }
+
+    #[test]
+    fn experiment_with_namespace_scope_does_not_apply_to_unrelated_root_rfa() {
+        let experiment = experiment_with_scope(None, Some("p_landing_v1.*"));
+        let page_config = test_page_config("/other.html", "p_other_v1");
+        let request = test_request("/other.html");
+
+        assert!(!experiment_applies_to_request(
+            &experiment,
+            &request,
+            &page_config
+        ));
+    }
+
+    #[test]
+    fn experiment_requires_path_and_namespace_scope_to_match() {
+        let experiment = experiment_with_scope(Some("/index.html"), Some("p_landing_v1.*"));
+        let page_config = test_page_config("/index.html", "p_landing_v1");
+        let request = test_request("/index.html");
+
+        assert!(experiment_applies_to_request(
+            &experiment,
+            &request,
+            &page_config
+        ));
+
+        let other_path_request = test_request("/other.html");
+        assert!(!experiment_applies_to_request(
+            &experiment,
+            &other_path_request,
+            &page_config
+        ));
+
+        let other_page_config = test_page_config("/index.html", "p_other_v1");
+        assert!(!experiment_applies_to_request(
+            &experiment,
+            &request,
+            &other_page_config
+        ));
+    }
 }
