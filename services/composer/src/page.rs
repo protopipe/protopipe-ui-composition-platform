@@ -66,7 +66,7 @@ pub struct PageConfigDto {
     pub rfa: String,
     pub timeout_ms: u64,
     pub content_type: Option<String>,
-    pub data: PageDataDto,
+    pub data: Option<PageDataDto>,
     pub interaction: Option<serde_json::Value>,
 }
 
@@ -108,7 +108,12 @@ pub async fn register_page(
             .content_type
             .clone()
             .unwrap_or_else(|| "text/html; charset=utf-8".into()),
-        data: config.data.clone().into_iter().collect(),
+        data: config
+            .data
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .collect(),
         interaction: config.interaction.clone(),
     };
 
@@ -131,7 +136,7 @@ pub async fn get_pages(state: web::Data<AppState>) -> HttpResponse {
             rfa: config.rfa.clone(),
             timeout_ms: config.timeout_ms,
             content_type: Some(config.content_type.clone()),
-            data: config.data.clone().into_iter().collect(),
+            data: Some(config.data.clone().into_iter().collect()),
             interaction: config.interaction.clone(),
         })
         .collect();

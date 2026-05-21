@@ -39,11 +39,18 @@ pub struct Variant {
 pub struct PageOverrides {
     pub page_type: Option<page::PageType>,
     pub template: Option<String>,
-    pub rfa: Option<String>,
+    pub rfa: Option<RfaOverride>,
     pub timeout_ms: Option<u64>,
     pub content_type: Option<String>,
     pub data: Option<HashMap<String, page::DataValue>>,
     pub interaction: Option<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RfaOverride {
+    Direct(String),
+    Replace { old: String, new: String },
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -51,7 +58,7 @@ pub struct PageOverridesDto {
     #[serde(rename = "type")]
     pub page_type: Option<page::PageType>,
     pub template: Option<String>,
-    pub rfa: Option<String>,
+    pub rfa: Option<RfaOverride>,
     pub timeout_ms: Option<u64>,
     pub content_type: Option<String>,
     pub data: Option<HashMap<String, page::DataValue>>,
@@ -60,6 +67,7 @@ pub struct PageOverridesDto {
 
 pub struct ResolvedPageConfig {
     pub page_config: page::PageConfig,
+    pub rfa_replacements: HashMap<String, String>,
     pub assignment_cookie: Option<Cookie<'static>>,
 }
 
@@ -74,6 +82,7 @@ pub fn resolve_page_config(
 ) -> Option<ResolvedPageConfig> {
     let path = req.path();
     let mut page_config = page::resolve_page(state, path)?;
+    let mut rfa_replacements = HashMap::new();
     let mut assignment_cookie = None;
 
     let experiments = state.experiments.lock().unwrap();
@@ -86,7 +95,11 @@ pub fn resolve_page_config(
         }
 
         if let Some(assignment) = determine_variant(experiment, req, &cookie_name) {
-            apply_overrides(&mut page_config, &assignment.variant.overrides);
+            apply_overrides(
+                &mut page_config,
+                &mut rfa_replacements,
+                &assignment.variant.overrides,
+            );
 
             if assignment.should_set_cookie {
                 assignment_cookie = Some(
@@ -104,6 +117,7 @@ pub fn resolve_page_config(
 
     Some(ResolvedPageConfig {
         page_config,
+        rfa_replacements,
         assignment_cookie,
     })
 }
@@ -242,7 +256,11 @@ impl From<PageOverrides> for PageOverridesDto {
     }
 }
 
-fn apply_overrides(page_config: &mut page::PageConfig, overrides: &PageOverrides) {
+fn apply_overrides(
+    page_config: &mut page::PageConfig,
+    rfa_replacements: &mut HashMap<String, String>,
+    overrides: &PageOverrides,
+) {
     if let Some(page_type) = &overrides.page_type {
         page_config.page_type = page_type.clone();
     }
@@ -252,7 +270,15 @@ fn apply_overrides(page_config: &mut page::PageConfig, overrides: &PageOverrides
     }
 
     if let Some(rfa) = &overrides.rfa {
-        page_config.rfa = rfa.clone();
+        match rfa {
+            RfaOverride::Direct(rfa) => page_config.rfa = rfa.clone(),
+            RfaOverride::Replace { old, new } => {
+                rfa_replacements.insert(old.clone(), new.clone());
+                if page_config.rfa == *old {
+                    page_config.rfa = new.clone();
+                }
+            }
+        }
     }
 
     if let Some(timeout_ms) = overrides.timeout_ms {

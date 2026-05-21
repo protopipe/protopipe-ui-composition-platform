@@ -3,6 +3,7 @@ use actix_web::{web, HttpRequest, HttpResponse};
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use deno_core::{error::AnyError, serde_v8, v8, JsRuntime, RuntimeOptions};
 use serde_json::Value;
+use std::collections::HashMap;
 use tokio::sync::oneshot;
 
 pub struct RenderPool {
@@ -14,6 +15,7 @@ pub enum RenderRequest {
     Render {
         rfa_id: String,
         context_json: String,
+        rfa_replacements_json: String,
         response: oneshot::Sender<Result<String, AnyError>>,
     },
 }
@@ -53,11 +55,17 @@ impl RenderPool {
         Ok(())
     }
 
-    pub async fn render(&self, rfa_id: &str, context: &Value) -> Result<String, AnyError> {
+    pub async fn render(
+        &self,
+        rfa_id: &str,
+        context: &Value,
+        rfa_replacements: &HashMap<String, String>,
+    ) -> Result<String, AnyError> {
         let (tx, rx) = oneshot::channel();
         let request = RenderRequest::Render {
             rfa_id: rfa_id.to_string(),
             context_json: serde_json::to_string(context)?,
+            rfa_replacements_json: serde_json::to_string(rfa_replacements)?,
             response: tx,
         };
 
@@ -121,9 +129,10 @@ impl Worker {
                 Ok(RenderRequest::Render {
                     rfa_id,
                     context_json,
+                    rfa_replacements_json,
                     response,
                 }) => {
-                    self.execute_render(&rfa_id, &context_json)
+                    self.execute_render(&rfa_id, &context_json, &rfa_replacements_json)
                         .map_err(|e| log::error!("Render error: {}", e))
                         .ok()
                         .and_then(|output| response.send(Ok(output)).ok());
@@ -136,18 +145,37 @@ impl Worker {
         }
     }
 
-    fn execute_render(&mut self, rfa_id: &str, context_json: &str) -> Result<String, AnyError> {
+    fn execute_render(
+        &mut self,
+        rfa_id: &str,
+        context_json: &str,
+        rfa_replacements_json: &str,
+    ) -> Result<String, AnyError> {
         let script = format!(
             r#"
 (function() {{
     const render = globalThis.rfaRegistry[{rfa_id}];
     const context = JSON.parse({context_json:?});
-    const output = render(context);
+    const rfaReplacements = JSON.parse({rfa_replacements_json:?});
+    const partials = {{
+        include: function(partialId, partialContext) {{
+            const resolvedPartialId = rfaReplacements[partialId] || partialId;
+            const partial = globalThis.rfaRegistry[resolvedPartialId];
+            if (typeof partial !== "function") {{
+                throw new Error("RFA not found: " + resolvedPartialId);
+            }}
+
+            const output = partial(partialContext === undefined ? context : partialContext, partials);
+            return typeof output === "string" ? output : JSON.stringify(output);
+        }}
+    }};
+    const output = render(context, partials);
     return typeof output === 'string' ? output : JSON.stringify(output);
 }})()
 "#,
             rfa_id = serde_json::to_string(rfa_id)?,
-            context_json = context_json
+            context_json = context_json,
+            rfa_replacements_json = rfa_replacements_json
         );
 
         let result = self
@@ -196,7 +224,15 @@ pub async fn render_page(state: web::Data<AppState>, req: HttpRequest) -> HttpRe
     }
 
     let context = contextloader::build_context(&page_config.data);
-    let rendered = match state.render_pool.render(&page_config.rfa, &context).await {
+    let rendered = match state
+        .render_pool
+        .render(
+            &page_config.rfa,
+            &context,
+            &resolved_page_config.rfa_replacements,
+        )
+        .await
+    {
         Ok(output) => output,
         Err(err) => {
             log::error!("RFA execution failed: {}", err);
