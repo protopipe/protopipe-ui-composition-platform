@@ -1,0 +1,12 @@
+{
+  "editor.codeLens": true,
+  "rust-analyzer.lens.enable": true,
+  "rust-analyzer.lens.run.enable": true,
+  "rust-analyzer.lens.debug.enable": true,
+  "rust-analyzer.linkedProjects": [
+    "services/composer/Cargo.toml",
+    "services/messagebridge/Cargo.toml",
+    "services/message-worker-mock/Cargo.toml",
+    "tests/bdd/Cargo.toml"
+  ]
+}
