@@ -252,7 +252,7 @@ pub async fn render_page(state: web::Data<AppState>, req: HttpRequest) -> HttpRe
             .body(format!("RFA not found: {}", page_config.rfa));
     }
 
-    let context = contextloader::build_context(&page_config.data);
+    let context = contextloader::build_context(&page_config.data, &req);
     let rendered = match state
         .render_pool
         .render(

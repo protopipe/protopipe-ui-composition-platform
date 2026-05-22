@@ -25,6 +25,6 @@ async fn main() {
                 .boxed_local()
             },
         )
-        .run(features)
+        .run_and_exit(features)
         .await;
 }

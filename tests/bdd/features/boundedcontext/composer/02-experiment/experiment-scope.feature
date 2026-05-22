@@ -207,7 +207,6 @@ I want experiment overrides to only apply to a given experiment scope, so that I
        Then the response should contain "Do you want to try our product?<button>Ok</button>"
 
 
-      @WIP
       Scenario: Path infix wildcard does apply experiment override 
        Given a registered page config:
         """
