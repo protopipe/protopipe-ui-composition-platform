@@ -1,6 +1,7 @@
 use crate::experiment;
 use crate::page;
 use crate::render;
+use crate::service;
 use crate::AppState;
 use actix_web::{web, HttpResponse};
 
@@ -15,6 +16,7 @@ pub async fn reset_config(state: web::Data<AppState>) -> HttpResponse {
     page::reset_config(state.clone()).await;
     experiment::reset_config(state.clone()).await;
     render::reset_config(state.clone()).await;
+    service::reset_config(state.clone()).await;
 
     HttpResponse::Ok().json(serde_json::json!({"status": "Config reset successfully"}))
 }

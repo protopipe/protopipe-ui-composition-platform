@@ -7,14 +7,17 @@ mod contextloader;
 mod experiment;
 mod page;
 mod render;
+mod service;
 
 pub use experiment::{ExperimentConfig, Variant};
 pub use page::{DataValue, PageConfig, RFAConfig};
+pub use service::ServiceConfig;
 
 pub struct AppState {
     pub pages: Mutex<HashMap<String, PageConfig>>,
     pub experiments: Mutex<HashMap<String, ExperimentConfig>>,
     pub rfas: Mutex<HashMap<String, RFAConfig>>,
+    pub services: Mutex<HashMap<String, ServiceConfig>>,
     pub render_pool: render::RenderPool,
 }
 
@@ -31,6 +34,7 @@ async fn main() -> std::io::Result<()> {
         pages: Mutex::new(HashMap::new()),
         experiments: Mutex::new(HashMap::new()),
         rfas: Mutex::new(HashMap::new()),
+        services: Mutex::new(HashMap::new()),
         render_pool,
     });
 
@@ -48,6 +52,17 @@ async fn main() -> std::io::Result<()> {
                 .route("/config/pages", web::post().to(page::register_page))
                 .route("/config/pages", web::get().to(page::get_pages))
                 .route("/config/rfas", web::post().to(page::register_rfa))
+                .route("/config/services", web::post().to(service::upsert_service))
+                .route("/config/services", web::put().to(service::upsert_service))
+                .route("/config/services", web::get().to(service::get_services))
+                .route(
+                    "/config/services/{service_id}",
+                    web::get().to(service::get_service),
+                )
+                .route(
+                    "/config/services/{service_id}",
+                    web::delete().to(service::delete_service),
+                )
                 .route(
                     "/config/experiments",
                     web::post().to(experiment::register_experiment),

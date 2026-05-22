@@ -35,6 +35,7 @@ together with the source code.
 - [ADR-0018: Use Internal Brokers and Governed Business Event Sourcing](0018-use-internal-brokers-and-governed-business-event-sourcing.md)
 - [ADR-0019: Use State-Carrying Business Events for Shadow and Experiment Services](0019-use-state-carrying-business-events-for-shadow-and-experiment-services.md)
 - [ADR-0020: Support Proxy Page Markers as Stable and Experimental Composition Points](0020-support-proxy-page-markers-as-stable-and-experimental-composition-points.md)
+- [ADR-0021: Resolve Page REST Service Data Server-Side](0021-resolve-page-rest-service-data-server-side.md)
 
 ---
 

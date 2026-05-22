@@ -88,7 +88,7 @@ async fn render_rfa(
     page_config: &page::PageConfig,
     resolved_page_config: &experiment::ResolvedPageConfig,
 ) -> Result<String, HttpResponse> {
-    let context = contextloader::build_context(&page_config.data, req);
+    let context = contextloader::build_context(state, &page_config.data, req).await;
     state
         .render_pool
         .render(
@@ -109,7 +109,7 @@ async fn render_proxy_page_response(
     markers: &[page::ProxyMarkerReplacement],
 ) -> Result<HttpResponse, HttpResponse> {
     let replacement_tasks =
-        start_marker_replacements(state, req, page_config, resolved_page_config, markers)?;
+        start_marker_replacements(state, req, page_config, resolved_page_config, markers).await?;
 
     let upstream_response = fetch_upstream(origin, req)
         .await
@@ -124,14 +124,14 @@ async fn render_proxy_page_response(
     Ok(response.streaming(body_stream))
 }
 
-fn start_marker_replacements(
+async fn start_marker_replacements(
     state: &web::Data<AppState>,
     req: &HttpRequest,
     page_config: &page::PageConfig,
     resolved_page_config: &experiment::ResolvedPageConfig,
     markers: &[page::ProxyMarkerReplacement],
 ) -> Result<Vec<ActiveMarkerReplacement>, HttpResponse> {
-    let context = contextloader::build_context(&page_config.data, req);
+    let context = contextloader::build_context(state, &page_config.data, req).await;
     let mut replacements = Vec::new();
 
     for marker in markers {

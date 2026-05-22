@@ -163,17 +163,17 @@ impl ComposerWorld {
             ),
         }
 
-        let wiremock_reset_url = format!("{}/__admin/mappings", self.wiremock_url);
-        let wiremock_response = self
+        let wiremock_reset_url = format!("{}/__admin/reset", self.wiremock_url);
+        match self
             .client
             .as_ref()
             .unwrap()
-            .delete(&wiremock_reset_url)
+            .post(&wiremock_reset_url)
             .send()
-            .await;
-        match wiremock_response {
+            .await
+        {
             Ok(response) => log::info!(
-                "Cleanup: Sent DELETE request to {}, {}",
+                "Cleanup: Sent POST request to {}, {}",
                 wiremock_reset_url,
                 response.status()
             ),
@@ -207,6 +207,117 @@ async fn wait_for_http(client: &reqwest::Client, url: &str) {
     }
 
     panic!("service at {url} did not become ready: {last_error:?}");
+}
+
+#[given(regex = r#"^a backend service "([^"]*)"$"#)]
+async fn register_backend_service(world: &mut ComposerWorld, service_id: String) {
+    let payload = serde_json::json!({
+        "service_id": service_id,
+        "base_url": format!("http://wiremock:8080/{}", service_id)
+    });
+
+    let url = format!("{}:9000/admin/config/services", world.admin_url);
+    let response = world
+        .client
+        .as_ref()
+        .unwrap()
+        .post(&url)
+        .json(&payload)
+        .send()
+        .await;
+
+    match response {
+        Ok(resp) => {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_else(|_| "no body".to_string());
+
+            assert!(
+                status.is_success(),
+                "Failed to register backend service. Status: {}, Response: {}",
+                status,
+                body
+            );
+        }
+        Err(e) => {
+            panic!(
+                "Failed to register backend service at {}. Error: {}",
+                url, e
+            );
+        }
+    }
+}
+
+#[given(
+    regex = r#"^backend service "([^"]*)" returns JSON for (GET|POST|PUT|DELETE|PATCH) ([^:]+):$"#
+)]
+async fn backend_service_returns_json(
+    world: &mut ComposerWorld,
+    service_id: String,
+    method: String,
+    path: String,
+    step: &GherkinStep,
+) {
+    let docstring = step
+        .docstring()
+        .expect("Expected docstring for backend service response");
+    let json_body: serde_json::Value =
+        serde_json::from_str(docstring).expect("Invalid JSON in backend service response");
+    let service_path = format!(
+        "/{}{}",
+        service_id.trim_matches('/'),
+        ensure_leading_slash(&path)
+    );
+    let payload = serde_json::json!({
+        "request": {
+            "method": method,
+            "url": service_path
+        },
+        "response": {
+            "status": 200,
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "jsonBody": json_body
+        }
+    });
+
+    let url = format!("{}/__admin/mappings", world.wiremock_url);
+    let response = world
+        .client
+        .as_ref()
+        .unwrap()
+        .post(&url)
+        .json(&payload)
+        .send()
+        .await;
+
+    match response {
+        Ok(resp) => {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_else(|_| "no body".to_string());
+
+            assert!(
+                status.is_success(),
+                "Failed to register WireMock mapping. Status: {}, Response: {}",
+                status,
+                body
+            );
+        }
+        Err(e) => {
+            panic!(
+                "Failed to register WireMock mapping at {}. Error: {}",
+                url, e
+            );
+        }
+    }
+}
+
+fn ensure_leading_slash(path: &str) -> String {
+    if path.starts_with('/') {
+        path.to_string()
+    } else {
+        format!("/{path}")
+    }
 }
 
 #[given(regex = r"^a registered IFA message channel:$")]

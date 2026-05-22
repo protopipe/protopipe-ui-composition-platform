@@ -23,12 +23,24 @@ pub struct GetParameterData {
     pub key: String,
 }
 
+/// A REST-backed data value resolved through a registered Composer service.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RestServiceData {
+    pub service: String,
+    pub path: String,
+    pub method: Option<String>,
+    pub timeout_ms: Option<u64>,
+    pub error_default: Option<serde_json::Value>,
+}
+
 /// A typed data value for page config.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum DataValue {
     Static(StaticData),
     DynamicRest(DynamicRestData),
+    #[serde(alias = "restService")]
+    RestService(RestServiceData),
     Url,
     #[serde(alias = "getParameter")]
     GetParameter(GetParameterData),

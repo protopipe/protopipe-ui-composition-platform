@@ -1,30 +1,135 @@
 use crate::DataValue;
+use crate::{service, AppState};
 use actix_web::HttpRequest;
+use futures::future::join_all;
+use reqwest::Method;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
+use std::time::Duration;
 
 /// Build the renderer context from page data values.
 ///
-/// Static values are passed through directly. Dynamic REST values are currently
-/// represented by their default payload until the REST loader is implemented.
-pub fn build_context(data: &HashMap<String, DataValue>, req: &HttpRequest) -> Value {
-    let mut context = Map::new();
+/// Static and runtime values are resolved locally. REST service values are
+/// resolved concurrently through registered Composer services.
+pub async fn build_context(
+    state: &AppState,
+    data: &HashMap<String, DataValue>,
+    req: &HttpRequest,
+) -> Value {
     let query_params = query_params(req.query_string());
+    let values = join_all(
+        data.iter()
+            .map(|(key, value)| resolve_context_value(state, req, &query_params, key, value)),
+    )
+    .await;
 
-    for (key, value) in data {
-        let item = match value {
-            DataValue::Static(static_data) => static_data.value.clone(),
-            DataValue::DynamicRest(dynamic) => dynamic.default.clone(),
-            DataValue::Url => Value::String(req.path().to_string()),
-            DataValue::GetParameter(get_parameter) => query_params
-                .get(&get_parameter.key)
-                .cloned()
-                .unwrap_or(Value::Null),
-        };
-        context.insert(key.clone(), item);
-    }
+    let mut context = Map::new();
+    context.extend(values);
 
     Value::Object(context)
+}
+
+async fn resolve_context_value(
+    state: &AppState,
+    req: &HttpRequest,
+    query_params: &Value,
+    key: &str,
+    value: &DataValue,
+) -> (String, Value) {
+    let item = match value {
+        DataValue::Static(static_data) => static_data.value.clone(),
+        DataValue::DynamicRest(dynamic) => dynamic.default.clone(),
+        DataValue::RestService(rest_service) => resolve_rest_service(state, rest_service).await,
+        DataValue::Url => Value::String(req.path().to_string()),
+        DataValue::GetParameter(get_parameter) => query_params
+            .get(&get_parameter.key)
+            .cloned()
+            .unwrap_or(Value::Null),
+    };
+
+    (key.to_string(), item)
+}
+
+async fn resolve_rest_service(
+    state: &AppState,
+    rest_service: &crate::page::RestServiceData,
+) -> Value {
+    let Some(service_config) = service::resolve_service(state, &rest_service.service) else {
+        log::warn!("REST service not registered: {}", rest_service.service);
+        return rest_error_default(rest_service);
+    };
+    let Ok(method) = rest_method(rest_service) else {
+        log::warn!(
+            "Unsupported REST method for service {}: {:?}",
+            rest_service.service,
+            rest_service.method
+        );
+        return rest_error_default(rest_service);
+    };
+    let url = service_url(&service_config.base_url, &rest_service.path);
+    let timeout = Duration::from_millis(rest_service.timeout_ms.unwrap_or(1000));
+    let client = reqwest::Client::new();
+    let request = client.request(method, &url);
+
+    match tokio::time::timeout(timeout, request.send()).await {
+        Ok(Ok(response)) if response.status().is_success() => {
+            response.json::<Value>().await.unwrap_or_else(|error| {
+                log::warn!(
+                    "REST service response was not valid JSON at {}: {}",
+                    url,
+                    error
+                );
+                rest_error_default(rest_service)
+            })
+        }
+        Ok(Ok(response)) => {
+            log::warn!(
+                "REST service returned non-success status at {}: {}",
+                url,
+                response.status()
+            );
+            rest_error_default(rest_service)
+        }
+        Ok(Err(error)) => {
+            log::warn!("REST service request failed at {}: {}", url, error);
+            rest_error_default(rest_service)
+        }
+        Err(_) => {
+            log::warn!("REST service request timed out at {}", url);
+            rest_error_default(rest_service)
+        }
+    }
+}
+
+fn rest_method(rest_service: &crate::page::RestServiceData) -> Result<Method, ()> {
+    match rest_service.method.as_deref().unwrap_or("GET") {
+        "GET" => Ok(Method::GET),
+        "POST" => Ok(Method::POST),
+        "PUT" => Ok(Method::PUT),
+        "DELETE" => Ok(Method::DELETE),
+        "PATCH" => Ok(Method::PATCH),
+        _ => Err(()),
+    }
+}
+
+fn service_url(base_url: &str, path: &str) -> String {
+    format!(
+        "{}{}",
+        base_url.trim_end_matches('/'),
+        ensure_leading_slash(path)
+    )
+}
+
+fn ensure_leading_slash(path: &str) -> String {
+    if path.starts_with('/') {
+        path.to_string()
+    } else {
+        format!("/{path}")
+    }
+}
+
+fn rest_error_default(rest_service: &crate::page::RestServiceData) -> Value {
+    rest_service.error_default.clone().unwrap_or(Value::Null)
 }
 
 fn query_params(query_string: &str) -> Value {
@@ -140,13 +245,24 @@ mod tests {
         );
     }
 
-    #[test]
-    fn build_context_injects_declared_url_without_query_string() {
+    fn test_state() -> AppState {
+        AppState {
+            pages: std::sync::Mutex::new(HashMap::new()),
+            experiments: std::sync::Mutex::new(HashMap::new()),
+            rfas: std::sync::Mutex::new(HashMap::new()),
+            services: std::sync::Mutex::new(HashMap::new()),
+            render_pool: crate::render::RenderPool::new(1),
+        }
+    }
+
+    #[actix_rt::test]
+    async fn build_context_injects_declared_url_without_query_string() {
         let mut data = HashMap::new();
         data.insert("url".to_string(), DataValue::Url);
         let request = test_request("/index.html?message=Hello");
+        let state = test_state();
 
-        let context = build_context(&data, &request);
+        let context = build_context(&state, &data, &request).await;
 
         assert_eq!(
             context,
@@ -156,8 +272,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn build_context_injects_declared_get_parameter() {
+    #[actix_rt::test]
+    async fn build_context_injects_declared_get_parameter() {
         let mut data = HashMap::new();
         data.insert(
             "getMessage".to_string(),
@@ -166,8 +282,9 @@ mod tests {
             }),
         );
         let request = test_request("/index.html?message=Hello");
+        let state = test_state();
 
-        let context = build_context(&data, &request);
+        let context = build_context(&state, &data, &request).await;
 
         assert_eq!(
             context,
@@ -177,8 +294,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn build_context_uses_null_for_missing_get_parameter() {
+    #[actix_rt::test]
+    async fn build_context_uses_null_for_missing_get_parameter() {
         let mut data = HashMap::new();
         data.insert(
             "getMessage".to_string(),
@@ -187,14 +304,53 @@ mod tests {
             }),
         );
         let request = test_request("/index.html");
+        let state = test_state();
 
-        let context = build_context(&data, &request);
+        let context = build_context(&state, &data, &request).await;
 
         assert_eq!(
             context,
             serde_json::json!({
                 "getMessage": null
             })
+        );
+    }
+
+    #[actix_rt::test]
+    async fn build_context_uses_error_default_for_missing_rest_service() {
+        let mut data = HashMap::new();
+        data.insert(
+            "product".to_string(),
+            DataValue::RestService(crate::page::RestServiceData {
+                service: "catalog".to_string(),
+                path: "/products/sku-123".to_string(),
+                method: Some("GET".to_string()),
+                timeout_ms: Some(250),
+                error_default: Some(serde_json::json!({
+                    "name": "Unknown product"
+                })),
+            }),
+        );
+        let request = test_request("/product.html");
+        let state = test_state();
+
+        let context = build_context(&state, &data, &request).await;
+
+        assert_eq!(
+            context,
+            serde_json::json!({
+                "product": {
+                    "name": "Unknown product"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn service_url_joins_base_url_and_path() {
+        assert_eq!(
+            service_url("http://wiremock:8080/catalog/", "/products/sku-123"),
+            "http://wiremock:8080/catalog/products/sku-123"
         );
     }
 }
