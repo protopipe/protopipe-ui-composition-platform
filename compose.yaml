@@ -36,7 +36,7 @@ services:
       target: dev
     working_dir: /app
     volumes:
-      - ./services/composer:/app
+      - ./services/composer:/app:z
       - composer-target:/app/target
       - cargo-registry:/usr/local/cargo/registry
       - cargo-git:/usr/local/cargo/git
@@ -105,7 +105,7 @@ services:
       target: dev
     working_dir: /app
     volumes:
-      - ./services/messagebridge:/app
+      - ./services/messagebridge:/app:z
       - cargo-registry:/usr/local/cargo/registry
       - cargo-git:/usr/local/cargo/git
     environment:
@@ -126,7 +126,7 @@ services:
     image: rust:1.95-bookworm
     working_dir: /workspace
     volumes:
-      - .:/workspace:Z
+      - .:/workspace:z
       - bdd-target:/workspace/tests/bdd/target
       - cargo-registry:/usr/local/cargo/registry
       - cargo-git:/usr/local/cargo/git
@@ -153,7 +153,7 @@ services:
     image: rust:1.95-bookworm
     working_dir: /workspace
     volumes:
-      - .:/workspace:Z
+      - .:/workspace:z
       - bdd-target:/workspace/tests/bdd/target
       - cargo-registry:/usr/local/cargo/registry
       - cargo-git:/usr/local/cargo/git
@@ -187,7 +187,7 @@ services:
     image: grafana/k6:1.0.0
     working_dir: /scripts
     volumes:
-      - ./tests/load:/scripts:Z
+      - ./tests/load:/scripts:z
     environment:
       COMPOSER_BASE_URL: http://composer:8080
       COMPOSER_ADMIN_URL: http://composer:9000
