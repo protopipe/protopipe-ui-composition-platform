@@ -1,5 +1,6 @@
 use cucumber::{gherkin::Step as GherkinStep, given, then, when};
 use futures::StreamExt;
+use regex::Regex;
 use reqwest::cookie::Jar;
 use std::collections::HashMap;
 use std::env;
@@ -22,6 +23,7 @@ pub struct ComposerWorld {
     pub first_streamed_chunk_elapsed_ms: Option<u128>,
     pub cookie_jar: Arc<Jar>,
     pub page_config: HashMap<String, String>,
+    pub variables: HashMap<String, String>,
 }
 
 impl ComposerWorld {
@@ -56,6 +58,7 @@ impl ComposerWorld {
             first_streamed_chunk_elapsed_ms: None,
             cookie_jar: jar,
             page_config: HashMap::new(),
+            variables: HashMap::new(),
         }
     }
 
@@ -190,6 +193,7 @@ impl ComposerWorld {
         self.first_streamed_chunk = None;
         self.first_streamed_chunk_elapsed_ms = None;
         self.page_config.clear();
+        self.variables.clear();
     }
 }
 
@@ -312,11 +316,86 @@ async fn backend_service_returns_json(
     }
 }
 
+#[given(
+    regex = r#"^backend service "([^"]*)" returns templated JSON for (GET|POST|PUT|DELETE|PATCH) ([^:]+):$"#
+)]
+async fn backend_service_returns_templated_json(
+    world: &mut ComposerWorld,
+    service_id: String,
+    method: String,
+    path: String,
+    step: &GherkinStep,
+) {
+    let body = step
+        .docstring()
+        .expect("Expected docstring for templated backend service response");
+    serde_json::from_str::<serde_json::Value>(body)
+        .expect("Invalid JSON in templated backend service response");
+
+    let service_path = backend_service_path(&service_id, &path);
+    let payload = serde_json::json!({
+        "request": {
+            "method": method,
+            "url": service_path
+        },
+        "response": {
+            "status": 200,
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "body": body,
+            "transformers": ["response-template"]
+        }
+    });
+
+    register_wiremock_mapping(world, payload).await;
+}
+
 fn ensure_leading_slash(path: &str) -> String {
     if path.starts_with('/') {
         path.to_string()
     } else {
         format!("/{path}")
+    }
+}
+
+fn backend_service_path(service_id: &str, path: &str) -> String {
+    format!(
+        "/{}{}",
+        service_id.trim_matches('/'),
+        ensure_leading_slash(path)
+    )
+}
+
+async fn register_wiremock_mapping(world: &mut ComposerWorld, payload: serde_json::Value) {
+    let url = format!("{}/__admin/mappings", world.wiremock_url);
+    let response = world
+        .client
+        .as_ref()
+        .unwrap()
+        .post(&url)
+        .json(&payload)
+        .send()
+        .await;
+
+    match response {
+        Ok(resp) => {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_else(|_| "no body".to_string());
+
+            assert!(
+                status.is_success(),
+                "Failed to register WireMock mapping. Status: {}, Response: {}",
+                status,
+                body
+            );
+        }
+        Err(e) => {
+            panic!(
+                "Failed to register WireMock mapping at {}. Error: {}",
+                url, e
+            );
+        }
     }
 }
 
@@ -870,6 +949,26 @@ async fn check_response_not_contains(world: &mut ComposerWorld, unexpected_text:
         response
     );
 }
+#[then(regex = r#"^the response should contain a unix timestamp after "([^"]*)"$"#)]
+async fn check_response_contains_unix_timestamp_after(world: &mut ComposerWorld, prefix: String) {
+    let response = world.last_response.as_ref().expect("No response received");
+    let start = response
+        .find(&prefix)
+        .unwrap_or_else(|| panic!("Prefix '{}' not found in response:\n{}", prefix, response))
+        + prefix.len();
+    let timestamp: String = response[start..]
+        .chars()
+        .take_while(|character| character.is_ascii_digit())
+        .collect();
+
+    assert!(
+        timestamp.len() >= 10 && timestamp.parse::<u64>().is_ok(),
+        "Expected a unix timestamp after '{}', got '{}'.\n\nActual response:\n{}",
+        prefix,
+        timestamp,
+        response
+    );
+}
 
 #[then(regex = r"^the upstream response should be streamed without marker replacement$")]
 async fn upstream_response_should_be_streamed_without_marker_replacement(
@@ -877,6 +976,115 @@ async fn upstream_response_should_be_streamed_without_marker_replacement(
 ) {
     // The current BDD client observes the completed response body. Runtime
     // streaming is covered by ADR-0020 and will need lower-level tests.
+}
+
+#[then(regex = r#"^extract from response "+(.+)"+ as ([A-Za-z_][A-Za-z0-9_]*)$"#)]
+async fn extract_from_response(world: &mut ComposerWorld, pattern: String, variable_name: String) {
+    let response = world.last_response.as_ref().expect("No response received");
+    let regex = Regex::new(&pattern).unwrap_or_else(|error| {
+        panic!("Invalid response extraction regex '{}': {}", pattern, error)
+    });
+    let captures = regex.captures(response).unwrap_or_else(|| {
+        panic!(
+            "Pattern '{}' did not match response.\n\nActual response:\n{}",
+            pattern, response
+        )
+    });
+    let value = captures
+        .get(1)
+        .unwrap_or_else(|| {
+            panic!(
+                "Pattern '{}' must contain at least one capture group",
+                pattern
+            )
+        })
+        .as_str()
+        .to_string();
+
+    world.variables.insert(variable_name, value);
+}
+
+#[then(regex = r#"^assert that ([A-Za-z_][A-Za-z0-9_]*) is less than ([A-Za-z_][A-Za-z0-9_]*)$"#)]
+async fn assert_variable_less_than(
+    world: &mut ComposerWorld,
+    left_name: String,
+    right_name: String,
+) {
+    let left = numeric_variable(world, &left_name);
+    let right = numeric_variable(world, &right_name);
+
+    assert!(
+        left < right,
+        "Expected variable '{}' ({}) to be less than '{}' ({})",
+        left_name,
+        left,
+        right_name,
+        right
+    );
+}
+
+fn numeric_variable(world: &ComposerWorld, name: &str) -> u128 {
+    let value = world
+        .variables
+        .get(name)
+        .unwrap_or_else(|| panic!("Variable '{}' is not defined", name));
+
+    value.parse::<u128>().unwrap_or_else(|error| {
+        panic!(
+            "Variable '{}' value '{}' is not numeric: {}",
+            name, value, error
+        )
+    })
+}
+
+#[then(
+    regex = r#"^backend service "([^"]*)" should have received (\d+) request[s]? for (GET|POST|PUT|DELETE|PATCH) (.+)$"#
+)]
+async fn backend_service_should_have_received_requests(
+    world: &mut ComposerWorld,
+    service_id: String,
+    expected_count: u64,
+    method: String,
+    path: String,
+) {
+    let service_path = backend_service_path(&service_id, &path);
+    let payload = serde_json::json!({
+        "method": method,
+        "url": service_path
+    });
+    let url = format!("{}/__admin/requests/count", world.wiremock_url);
+    let response = world
+        .client
+        .as_ref()
+        .unwrap()
+        .post(&url)
+        .json(&payload)
+        .send()
+        .await
+        .expect("Failed to query WireMock request count");
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .unwrap_or_else(|_| "no body".to_string());
+
+    assert!(
+        status.is_success(),
+        "Failed to query WireMock request count. Status: {}, Response: {}",
+        status,
+        body
+    );
+
+    let count = serde_json::from_str::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|value| value.get("count").and_then(|count| count.as_u64()))
+        .expect("WireMock request count response did not contain numeric count");
+
+    assert_eq!(
+        count, expected_count,
+        "Expected backend service '{}' to receive {} {} request(s) for {}, got {}",
+        service_id, expected_count, method, path, count
+    );
 }
 
 #[then(regex = r#"^the response should contain JSON:$"#)]
