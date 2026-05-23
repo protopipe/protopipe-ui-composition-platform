@@ -29,6 +29,31 @@ Feature: Runtime Context Injection
       When I request GET /index.html
       Then the response should contain "p_landing_v1.a_namespace-printer_v1"
 
+  Rule: Namespace and index context is injected into Partials, when using include with index
+  
+    Scenario: RFA receives always namespace-context and renders it in partial
+      Given a registered page config:
+        """
+        {
+          "path": "/index.html",
+          "page_id": "landing",
+          "type": "rfa",
+          "template": "landing",
+          "rfa": "p_landing_v1",
+          "timeout_ms": 3000
+        }
+        """
+      And a registered RFA "p_landing_v1":
+        """
+        function(context, partials) { return partials.include('a_namespace-printer_v1', context, 1); }
+        """
+      And a registered RFA "a_namespace-printer_v1":
+        """
+        function(context) { return context.namespace; }
+        """
+      When I request GET /index.html
+      Then the response should contain "p_landing_v1.1.a_namespace-printer_v1"
+
   Rule: URL is injected into Partials, when requested by page-config
 
     Scenario: RFA receives URL (without GET-Parameters) context and renders dynamic content
