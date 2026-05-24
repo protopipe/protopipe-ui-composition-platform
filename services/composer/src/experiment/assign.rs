@@ -181,7 +181,6 @@ mod tests {
             delivery: page::PageDelivery::Composer,
             timeout_ms: 3000,
             content_type: "text/html; charset=utf-8".to_string(),
-            submit: None,
             data: HashMap::new(),
             interaction: None,
         }

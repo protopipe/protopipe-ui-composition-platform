@@ -1,0 +1,21 @@
+@startuml
+actor Browser
+participant Composer
+participant "Post Service" as PostService
+participant "Read Service" as ReadService
+participant RFA
+
+Browser -> Composer: POST /contact.html\nform data
+Composer -> Composer: Resolve effective POST page
+Composer -> PostService: POST /contact-requests\nform data
+PostService --> Composer: write acknowledged
+Composer --> Browser: 303 See Other\nLocation: /contact/received.html
+
+Browser -> Composer: GET /contact/received.html
+Composer -> Composer: Resolve effective GET page
+Composer -> ReadService: GET result/supporting data
+ReadService --> Composer: resolved data
+Composer -> RFA: render(context)
+RFA --> Composer: html
+Composer --> Browser: 200 OK\nhtml
+@enduml

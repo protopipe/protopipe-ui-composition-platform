@@ -908,7 +908,11 @@ async fn submit_post_form(world: &mut ComposerWorld, path: String, step: &Gherki
     let url = format!("{}:8080{}", world.base_url, path);
     log::info!("Submitting form to page: {}", url);
 
-    let client = world.client.as_ref().expect("HTTP client not initialized");
+    let client = reqwest::Client::builder()
+        .cookie_provider(Arc::clone(&world.cookie_jar))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .expect("HTTP client not initialized");
     let started_at = Instant::now();
     let response = client
         .post(&url)
@@ -974,6 +978,33 @@ async fn check_status(world: &mut ComposerWorld, expected_code: u16) {
         actual, expected_code,
         "Status mismatch: expected {}, got {}",
         expected_code, actual
+    );
+}
+
+#[then(regex = r#"^the response header "([^"]*)" should contain "([^"]*)"$"#)]
+async fn check_response_header_contains(
+    world: &mut ComposerWorld,
+    header_name: String,
+    expected_text: String,
+) {
+    let headers = world.last_headers.as_ref().expect("No response received");
+    let header_value = headers
+        .get(header_name.as_str())
+        .unwrap_or_else(|| panic!("Response header '{}' not found", header_name))
+        .to_str()
+        .unwrap_or_else(|error| {
+            panic!(
+                "Response header '{}' is not valid text: {}",
+                header_name, error
+            )
+        });
+
+    assert!(
+        header_value.contains(&expected_text),
+        "Expected response header '{}' to contain '{}', got '{}'",
+        header_name,
+        expected_text,
+        header_value
     );
 }
 

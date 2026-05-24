@@ -10,11 +10,11 @@ mod render;
 mod service;
 
 pub use experiment::{ExperimentConfig, Variant};
-pub use page::{DataValue, PageConfig, RFAConfig};
+pub use page::{ComposerRoute, DataValue, PageConfig, RFAConfig};
 pub use service::ServiceConfig;
 
 pub struct AppState {
-    pub pages: Mutex<HashMap<String, PageConfig>>,
+    pub pages: Mutex<HashMap<String, ComposerRoute>>,
     pub experiments: Mutex<HashMap<String, ExperimentConfig>>,
     pub rfas: Mutex<HashMap<String, RFAConfig>>,
     pub services: Mutex<HashMap<String, ServiceConfig>>,

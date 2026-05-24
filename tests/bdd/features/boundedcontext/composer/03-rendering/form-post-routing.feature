@@ -2,25 +2,29 @@
 Feature: Form POST routing
   As a product manager,
   I want the Composer to route submitted form data to one configured backend service,
-  so that RFAs can render a confirmation page from the service result and supporting page data.
+  so that successful submissions redirect to a GET result page without resubmitting the form.
 
-  Rule: A submitted form is processed by one POST service while supporting data is still resolved with GET.
+  Successful POST submissions follow ADR-0022 and return 303 See Other before
+  rendering the result page. This keeps browser reloads from repeating form
+  submissions and keeps experiment-driven side effects manageable: experiments
+  may replace the configured post service, but RFAs still render only after the
+  side effect has been acknowledged and represented as version-fenced GET
+  parameters for the result page.
 
-    Scenario: Contact request submission renders a PageResult confirmation
+  Rule: A submitted form is processed by one POST service before redirecting to a GET result page.
+
+    Scenario: Contact request submission redirects with a version-fenced write acknowledgement
 
       Given a backend service "contact"
-      And a backend service "content"
       And backend service "contact" returns JSON for POST /contact-requests:
         """
         {
-          "status": "received",
-          "reference": "REQ-123"
-        }
-        """
-      And backend service "content" returns JSON for GET /contact-page:
-        """
-        {
-          "headline": "Kontaktanfrage"
+          "stream": "contact-requests",
+          "subject": "contactRequest",
+          "businessKey": "REQ-123",
+          "partitionKey": "contact:REQ-123",
+          "version": 7,
+          "eventId": "evt-contact-123"
         }
         """
       And a registered page config:
@@ -29,47 +33,27 @@ Feature: Form POST routing
           "path": "/contact.html",
           "method": "POST",
           "page_id": "contact-page-result",
-          "type": "rfa",
-          "template": "PageResult",
-          "rfa": "contact_page_result_v1",
           "timeout_ms": 3000,
-          "submit": {
-            "target": "submission",
+          "postService": {
             "service": "contact",
             "path": "/contact-requests",
-            "method": "POST",
             "content_type": "application/x-www-form-urlencoded",
             "timeout_ms": 500,
-            "error_default": {
-              "status": "failed",
-              "reference": null
-            }
-          },
-          "data": {
-            "page": {
-              "type": "restService",
-              "service": "content",
-              "path": "/contact-page",
-              "method": "GET",
-              "timeout_ms": 250,
-              "error_default": {
-                "headline": "Kontakt"
-              }
+            "redirect": {
+              "path": "/contact/received.html"
             }
           }
         }
-        """
-      And a registered RFA "contact_page_result_v1":
-        """
-        function(context) { return context.page.headline + ": Ihr Formular wurde erhalten. Referenz " + context.submission.reference; }
         """
       When I submit POST /contact.html with form data:
         """
         name=Margaret Hamilton&email=margaret.hamilton@example.test&message=Bitte bestaetigen Sie die Landeprozedur.
         """
-      Then the response status should be 200
-      And the response should contain "Kontaktanfrage: Ihr Formular wurde erhalten. Referenz REQ-123"
+      Then the response status should be 303
+      And the response header "Location" should contain "/contact/received.html"
+      And the response header "Location" should contain "stream=contact-requests"
+      And the response header "Location" should contain "businessKey=REQ-123"
+      And the response header "Location" should contain "partitionKey=contact%3AREQ-123"
+      And the response header "Location" should contain "version=7"
       And backend service "contact" should have received 1 request for POST /contact-requests
       And backend service "contact" should have received a POST request for /contact-requests containing form field "email" with value "margaret.hamilton@example.test"
-      And backend service "content" should have received 1 request for GET /contact-page
-      And backend service "content" should have received 0 requests for POST /contact-page
