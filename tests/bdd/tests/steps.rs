@@ -24,6 +24,7 @@ pub struct ComposerWorld {
     pub cookie_jar: Arc<Jar>,
     pub page_config: HashMap<String, String>,
     pub variables: HashMap<String, String>,
+    pub last_request_duration: Option<Duration>,
 }
 
 impl ComposerWorld {
@@ -59,6 +60,7 @@ impl ComposerWorld {
             cookie_jar: jar,
             page_config: HashMap::new(),
             variables: HashMap::new(),
+            last_request_duration: None,
         }
     }
 
@@ -194,6 +196,7 @@ impl ComposerWorld {
         self.first_streamed_chunk_elapsed_ms = None;
         self.page_config.clear();
         self.variables.clear();
+        self.last_request_duration = None;
     }
 }
 
@@ -340,6 +343,43 @@ async fn backend_service_returns_templated_json(
         },
         "response": {
             "status": 200,
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "body": body,
+            "transformers": ["response-template"]
+        }
+    });
+
+    register_wiremock_mapping(world, payload).await;
+}
+
+#[given(
+    regex = r#"^backend service "([^"]*)" returns templated JSON after (\d+) ms for (GET|POST|PUT|DELETE|PATCH) ([^:]+):$"#
+)]
+async fn backend_service_returns_delayed_templated_json(
+    world: &mut ComposerWorld,
+    service_id: String,
+    delay_ms: u64,
+    method: String,
+    path: String,
+    step: &GherkinStep,
+) {
+    let body = step
+        .docstring()
+        .expect("Expected docstring for delayed templated backend service response");
+    serde_json::from_str::<serde_json::Value>(body)
+        .expect("Invalid JSON in delayed templated backend service response");
+
+    let service_path = backend_service_path(&service_id, &path);
+    let payload = serde_json::json!({
+        "request": {
+            "method": method,
+            "url": service_path
+        },
+        "response": {
+            "status": 200,
+            "fixedDelayMilliseconds": delay_ms,
             "headers": {
                 "Content-Type": "application/json"
             },
@@ -836,7 +876,50 @@ async fn request_page(world: &mut ComposerWorld, path: String) {
     log::info!("Requesting page: {}", url);
 
     let client = world.client.as_ref().expect("HTTP client not initialized");
+    let started_at = Instant::now();
     let response = client.get(&url).send().await;
+    world.last_request_duration = Some(started_at.elapsed());
+
+    match response {
+        Ok(resp) => {
+            world.last_status = Some(resp.status().as_u16());
+            world.last_headers = Some(resp.headers().clone());
+            world.last_response = Some(resp.text().await.unwrap_or_default());
+            log::debug!("Response status: {}", world.last_status.unwrap());
+            log::debug!(
+                "Response body length: {}",
+                world.last_response.as_ref().unwrap().len()
+            );
+        }
+        Err(e) => {
+            world.last_status = Some(0);
+            world.last_response = Some(format!("Error: {}", e));
+            log::error!("Request failed: {}", e);
+        }
+    }
+}
+
+#[when(regex = r"^I submit POST (.+) with form data:$")]
+async fn submit_post_form(world: &mut ComposerWorld, path: String, step: &GherkinStep) {
+    let form_body = step
+        .docstring()
+        .expect("Expected docstring with form data")
+        .trim();
+    let url = format!("{}:8080{}", world.base_url, path);
+    log::info!("Submitting form to page: {}", url);
+
+    let client = world.client.as_ref().expect("HTTP client not initialized");
+    let started_at = Instant::now();
+    let response = client
+        .post(&url)
+        .header(
+            reqwest::header::CONTENT_TYPE,
+            "application/x-www-form-urlencoded",
+        )
+        .body(form_body.to_string())
+        .send()
+        .await;
+    world.last_request_duration = Some(started_at.elapsed());
 
     match response {
         Ok(resp) => {
@@ -1023,6 +1106,21 @@ async fn assert_variable_less_than(
     );
 }
 
+#[then(regex = r#"^the last request should complete within (\d+) ms$"#)]
+async fn last_request_should_complete_within(world: &mut ComposerWorld, max_duration_ms: u64) {
+    let duration = world
+        .last_request_duration
+        .expect("No request duration recorded");
+    let actual_duration_ms = duration.as_millis() as u64;
+
+    assert!(
+        actual_duration_ms <= max_duration_ms,
+        "Expected last request to complete within {} ms, but it took {} ms",
+        max_duration_ms,
+        actual_duration_ms
+    );
+}
+
 fn numeric_variable(world: &ComposerWorld, name: &str) -> u128 {
     let value = world
         .variables
@@ -1085,6 +1183,128 @@ async fn backend_service_should_have_received_requests(
         "Expected backend service '{}' to receive {} {} request(s) for {}, got {}",
         service_id, expected_count, method, path, count
     );
+}
+
+#[then(
+    regex = r#"^backend service "([^"]*)" should have received a POST request for ([^ ]+) containing form field "([^"]*)" with value "([^"]*)"$"#
+)]
+async fn backend_service_should_have_received_post_form_field(
+    world: &mut ComposerWorld,
+    service_id: String,
+    path: String,
+    field_name: String,
+    expected_value: String,
+) {
+    let service_path = backend_service_path(&service_id, &path);
+    let payload = serde_json::json!({
+        "method": "POST",
+        "url": service_path
+    });
+    let url = format!("{}/__admin/requests/find", world.wiremock_url);
+    let response = world
+        .client
+        .as_ref()
+        .unwrap()
+        .post(&url)
+        .json(&payload)
+        .send()
+        .await
+        .expect("Failed to query WireMock request journal");
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .unwrap_or_else(|_| "no body".to_string());
+
+    assert!(
+        status.is_success(),
+        "Failed to query WireMock request journal. Status: {}, Response: {}",
+        status,
+        body
+    );
+
+    let journal = serde_json::from_str::<serde_json::Value>(&body)
+        .expect("WireMock request journal response was not valid JSON");
+    let requests = journal
+        .get("requests")
+        .and_then(|requests| requests.as_array())
+        .expect("WireMock request journal response did not contain requests array");
+    let request_bodies: Vec<String> = requests
+        .iter()
+        .filter_map(wiremock_request_body)
+        .collect();
+
+    assert!(
+        request_bodies.iter().any(|request_body| form_field_matches(
+            request_body,
+            &field_name,
+            &expected_value
+        )),
+        "Expected backend service '{}' to receive POST {} with form field '{}'='{}'. Actual request bodies: {:?}",
+        service_id,
+        path,
+        field_name,
+        expected_value,
+        request_bodies
+    );
+}
+
+fn wiremock_request_body(request: &serde_json::Value) -> Option<String> {
+    request
+        .get("body")
+        .and_then(|body| body.as_str())
+        .map(ToString::to_string)
+}
+
+fn form_field_matches(form_body: &str, expected_name: &str, expected_value: &str) -> bool {
+    form_body.split('&').any(|pair| {
+        let mut parts = pair.splitn(2, '=');
+        let name = percent_decode(parts.next().unwrap_or_default());
+        let value = percent_decode(parts.next().unwrap_or_default());
+
+        name == expected_name && value == expected_value
+    })
+}
+
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => {
+                output.push(b' ');
+                index += 1;
+            }
+            b'%' if index + 2 < bytes.len() => {
+                if let (Some(high), Some(low)) =
+                    (hex_value(bytes[index + 1]), hex_value(bytes[index + 2]))
+                {
+                    output.push(high * 16 + low);
+                    index += 3;
+                } else {
+                    output.push(bytes[index]);
+                    index += 1;
+                }
+            }
+            byte => {
+                output.push(byte);
+                index += 1;
+            }
+        }
+    }
+
+    String::from_utf8_lossy(&output).into_owned()
+}
+
+fn hex_value(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
 }
 
 #[then(regex = r#"^the response should contain JSON:$"#)]

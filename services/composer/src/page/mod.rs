@@ -10,13 +10,13 @@ use crate::AppState;
 #[allow(unused_imports)]
 pub use page_config::{
     validate_page_config, DataValue, DynamicRestData, GetParameterData, PageConfig, PageConfigDto,
-    PageDataDto, PageDelivery, PageType, ProxyMarkerReplacement, RestServiceData, StaticData,
+    PageDataDto, PageDelivery, PageType, ProxyMarkerReplacement, RestServiceData, StaticData, SubmitServiceData
 };
 pub use page_resolver::request_target;
 pub use rfa_config::{RFAConfig, RFAConfigDto};
 
-pub fn resolve_page(state: &AppState, path: &str) -> Option<PageConfig> {
-    page_resolver::resolve_page(state, path)
+pub fn resolve_page_for_method(state: &AppState, method: &str, path: &str) -> Option<PageConfig> {
+    page_resolver::resolve_page(state, method, path)
 }
 
 pub fn resolve_rfa(state: &AppState, rfa_id: &str) -> Option<RFAConfig> {

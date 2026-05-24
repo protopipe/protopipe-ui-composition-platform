@@ -29,6 +29,12 @@ pub async fn build_context(
     Value::Object(context)
 }
 
+pub fn insert_context_value(context: &mut Value, key: &str, value: Value) {
+    if let Value::Object(values) = context {
+        values.insert(key.to_string(), value);
+    }
+}
+
 async fn resolve_context_value(
     state: &AppState,
     req: &HttpRequest,
@@ -101,6 +107,61 @@ async fn resolve_rest_service(
     }
 }
 
+pub async fn resolve_submit_service(
+    state: &AppState,
+    submit: &crate::page::SubmitServiceData,
+    body: &[u8],
+) -> Value {
+    let Some(service_config) = service::resolve_service(state, &submit.service) else {
+        log::warn!("Submit service not registered: {}", submit.service);
+        return submit_error_default(submit);
+    };
+    let Ok(method) = submit_method(submit) else {
+        log::warn!(
+            "Unsupported submit method for service {}: {}",
+            submit.service,
+            submit.method
+        );
+        return submit_error_default(submit);
+    };
+    let url = service_url(&service_config.base_url, &submit.path);
+    let timeout = Duration::from_millis(submit.timeout_ms.unwrap_or(1000));
+    let client = reqwest::Client::new();
+    let request = client
+        .request(method, &url)
+        .header(reqwest::header::CONTENT_TYPE, submit.content_type.clone())
+        .body(body.to_vec());
+
+    match tokio::time::timeout(timeout, request.send()).await {
+        Ok(Ok(response)) if response.status().is_success() => {
+            response.json::<Value>().await.unwrap_or_else(|error| {
+                log::warn!(
+                    "Submit service response was not valid JSON at {}: {}",
+                    url,
+                    error
+                );
+                submit_error_default(submit)
+            })
+        }
+        Ok(Ok(response)) => {
+            log::warn!(
+                "Submit service returned non-success status at {}: {}",
+                url,
+                response.status()
+            );
+            submit_error_default(submit)
+        }
+        Ok(Err(error)) => {
+            log::warn!("Submit service request failed at {}: {}", url, error);
+            submit_error_default(submit)
+        }
+        Err(_) => {
+            log::warn!("Submit service request timed out at {}", url);
+            submit_error_default(submit)
+        }
+    }
+}
+
 fn rest_method(rest_service: &crate::page::RestServiceData) -> Result<Method, ()> {
     match rest_service.method.as_deref().unwrap_or("GET") {
         "GET" => Ok(Method::GET),
@@ -108,6 +169,13 @@ fn rest_method(rest_service: &crate::page::RestServiceData) -> Result<Method, ()
         "PUT" => Ok(Method::PUT),
         "DELETE" => Ok(Method::DELETE),
         "PATCH" => Ok(Method::PATCH),
+        _ => Err(()),
+    }
+}
+
+fn submit_method(submit: &crate::page::SubmitServiceData) -> Result<Method, ()> {
+    match submit.method.as_str() {
+        "POST" => Ok(Method::POST),
         _ => Err(()),
     }
 }
@@ -130,6 +198,10 @@ fn ensure_leading_slash(path: &str) -> String {
 
 fn rest_error_default(rest_service: &crate::page::RestServiceData) -> Value {
     rest_service.error_default.clone().unwrap_or(Value::Null)
+}
+
+fn submit_error_default(submit: &crate::page::SubmitServiceData) -> Value {
+    submit.error_default.clone().unwrap_or(Value::Null)
 }
 
 fn query_params(query_string: &str) -> Value {

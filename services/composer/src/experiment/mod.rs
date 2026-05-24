@@ -25,7 +25,8 @@ pub fn resolve_page_config(
     req: &HttpRequest,
 ) -> Option<ResolvedPageConfig> {
     let request_target = page::request_target(req.path(), req.query_string());
-    let mut page_config = page::resolve_page(state, &request_target)?;
+    let mut page_config =
+        page::resolve_page_for_method(state, req.method().as_str(), &request_target)?;
     let mut rfa_replacements = Vec::new();
     let mut assignment_cookie = None;
 

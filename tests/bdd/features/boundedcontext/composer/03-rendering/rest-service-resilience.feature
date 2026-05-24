@@ -8,6 +8,8 @@ Feature: REST service resilience
 
   Rule: REST service calls use a small bounded retry policy with backoff.
 
+  Rule: REST service calls must use bounded timeouts and explicit degraded rendering behavior.
+
   Rule: REST service calls can switch to an explicit fallback when the primary service fails.
 
   Rule: A circuit breaker opens when a service exceeds its configured failure threshold.

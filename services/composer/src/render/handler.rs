@@ -7,15 +7,23 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{contextloader, experiment, page, AppState};
 
-pub async fn render_page(state: web::Data<AppState>, req: HttpRequest) -> HttpResponse {
-    render_request(state, req).await
+pub async fn render_page(
+    state: web::Data<AppState>,
+    req: HttpRequest,
+    body: web::Bytes,
+) -> HttpResponse {
+    render_request(state, req, body).await
 }
 
 pub async fn reset_config(state: web::Data<AppState>) {
     state.render_pool.reset_rfas();
 }
 
-async fn render_request(state: web::Data<AppState>, req: HttpRequest) -> HttpResponse {
+async fn render_request(
+    state: web::Data<AppState>,
+    req: HttpRequest,
+    body: web::Bytes,
+) -> HttpResponse {
     let path = req.path();
     log::debug!("Render request: {}", path);
 
@@ -24,7 +32,44 @@ async fn render_request(state: web::Data<AppState>, req: HttpRequest) -> HttpRes
         None => return page_not_found(path),
     };
 
-    match render_resolved_page(&state, &req, resolved_page_config).await {
+    match req.method().as_str() {
+        "POST" => render_post_page(&state, &req, &body, resolved_page_config).await,
+        _ => render_get_page(&state, &req, resolved_page_config).await,
+    }
+}
+
+async fn render_get_page(
+    state: &web::Data<AppState>,
+    req: &HttpRequest,
+    resolved_page_config: experiment::ResolvedPageConfig,
+) -> HttpResponse {
+    match render_resolved_page(state, req, resolved_page_config, None).await {
+        Ok(response) => response,
+        Err(response) => response,
+    }
+}
+
+async fn render_post_page(
+    state: &web::Data<AppState>,
+    req: &HttpRequest,
+    body: &[u8],
+    resolved_page_config: experiment::ResolvedPageConfig,
+) -> HttpResponse {
+    let page_config = resolved_page_config.page_config.clone();
+    let submit_result = match page_config.submit.as_ref() {
+        Some(submit) => Some((
+            submit.target.clone(),
+            contextloader::resolve_submit_service(state, submit, body).await,
+        )),
+        None => {
+            return internal_error(
+                "Invalid page config",
+                "POST pages must define submit config",
+            )
+        }
+    };
+
+    match render_resolved_page(state, req, resolved_page_config, submit_result).await {
         Ok(response) => response,
         Err(response) => response,
     }
@@ -41,6 +86,7 @@ async fn render_resolved_page(
     state: &web::Data<AppState>,
     req: &HttpRequest,
     resolved_page_config: experiment::ResolvedPageConfig,
+    submit_result: Option<(String, serde_json::Value)>,
 ) -> Result<HttpResponse, HttpResponse> {
     let page_config = resolved_page_config.page_config.clone();
 
@@ -49,7 +95,7 @@ async fn render_resolved_page(
     match &page_config.delivery {
         page::PageDelivery::Composer => {
             validate_rfa_exists(state, &page_config)?;
-            let rendered = render_rfa(state, req, &page_config, &resolved_page_config).await?;
+            let rendered = render_rfa(state, req, &page_config, &resolved_page_config, submit_result).await?;
             Ok(ok_response(&page_config, &resolved_page_config, rendered))
         }
         page::PageDelivery::UpstreamProxy { origin, markers } => {
@@ -87,8 +133,13 @@ async fn render_rfa(
     req: &HttpRequest,
     page_config: &page::PageConfig,
     resolved_page_config: &experiment::ResolvedPageConfig,
+    submit_result: Option<(String, serde_json::Value)>,
 ) -> Result<String, HttpResponse> {
-    let context = contextloader::build_context(state, &page_config.data, req).await;
+    let mut context = contextloader::build_context(state, &page_config.data, req).await;
+    if let Some((target, value)) = submit_result {
+        contextloader::insert_context_value(&mut context, &target, value);
+    }
+
     state
         .render_pool
         .render(

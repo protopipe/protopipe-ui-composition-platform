@@ -92,6 +92,148 @@ Feature: REST service data
 
   Rule: Multiple REST service data values are resolved concurrently within the request budget.
 
+    Scenario: Independent REST service data values are resolved concurrently
+
+      Given a backend service "catalog"
+      And backend service "catalog" returns templated JSON after 700 ms for GET /products/sku-123:
+        """
+        {
+          "name": "Trail Shoe",
+          "resolvedAt": "{{now format='unix'}}"
+        }
+        """
+      And backend service "catalog" returns templated JSON after 700 ms for GET /prices/sku-123:
+        """
+        {
+          "amount": 129,
+          "currency": "EUR",
+          "resolvedAt": "{{now format='unix'}}"
+        }
+        """
+      And a registered page config:
+        """
+        {
+          "path": "/product-composed.html",
+          "page_id": "product-composed",
+          "type": "rfa",
+          "template": "product",
+          "rfa": "p_product_composed_v1",
+          "timeout_ms": 3000,
+          "data": {
+            "product": {
+              "type": "restService",
+              "service": "catalog",
+              "path": "/products/sku-123",
+              "method": "GET",
+              "timeout_ms": 1500,
+              "error_default": {
+                "name": "Unknown product"
+              }
+            },
+            "price": {
+              "type": "restService",
+              "service": "catalog",
+              "path": "/prices/sku-123",
+              "method": "GET",
+              "timeout_ms": 1500,
+              "error_default": {
+                "amount": 0,
+                "currency": "EUR"
+              }
+            }
+          }
+        }
+        """
+      And a registered RFA "p_product_composed_v1":
+        """
+        function(context) { return context.product.name + " costs " + context.price.amount + " " + context.price.currency; }
+        """
+      When I request GET /product-composed.html
+      Then the response should contain "Trail Shoe costs 129 EUR"
+      And the last request should complete within 1300 ms
+      And backend service "catalog" should have received 1 request for GET /products/sku-123
+      And backend service "catalog" should have received 1 request for GET /prices/sku-123
+
   Rule: REST service data is resolved after experiment overrides have produced the effective page configuration.
 
-  Rule: REST service calls must use bounded timeouts and explicit degraded rendering behavior.
+    Scenario: Experiment data override replaces the REST service before data resolution
+
+      Given a backend service "catalog"
+      And a backend service "catalog-preview"
+      And backend service "catalog" returns JSON for GET /products/sku-123:
+        """
+        {
+          "name": "Trail Shoe"
+        }
+        """
+      And backend service "catalog-preview" returns JSON for GET /products/sku-123:
+        """
+        {
+          "name": "Preview Trail Shoe"
+        }
+        """
+      And a registered page config:
+        """
+        {
+          "path": "/product-experiment.html",
+          "page_id": "product-experiment",
+          "type": "rfa",
+          "template": "product",
+          "rfa": "p_product_experiment_v1",
+          "timeout_ms": 3000,
+          "data": {
+            "product": {
+              "type": "restService",
+              "service": "catalog",
+              "path": "/products/sku-123",
+              "method": "GET",
+              "timeout_ms": 250,
+              "error_default": {
+                "name": "Unknown product"
+              }
+            }
+          }
+        }
+        """
+      And a registered experiment:
+        """
+        {
+          "experiment_id": "product_data_source_test",
+          "scope": {
+            "path": "/product-experiment.html"
+          },
+          "variants": [
+            {
+              "id": "control",
+              "weight": 50
+            },
+            {
+              "id": "preview",
+              "weight": 50,
+              "overrides": {
+                "data": {
+                  "product": {
+                    "type": "restService",
+                    "service": "catalog-preview",
+                    "path": "/products/sku-123",
+                    "method": "GET",
+                    "timeout_ms": 250,
+                    "error_default": {
+                      "name": "Unknown product"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+        """
+      And I have accepted the experiment cookie "pp_experiment_product_data_source_test" with value "preview"
+      And a registered RFA "p_product_experiment_v1":
+        """
+        function(context) { return context.product.name; }
+        """
+      When I request GET /product-experiment.html
+      Then the response should contain "Preview Trail Shoe"
+      And backend service "catalog-preview" should have received 1 request for GET /products/sku-123
+      And backend service "catalog" should have received 0 requests for GET /products/sku-123
