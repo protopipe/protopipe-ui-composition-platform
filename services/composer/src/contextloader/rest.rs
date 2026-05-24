@@ -64,12 +64,13 @@ fn rest_service_query(
     request_context: &RequestContext,
 ) -> Option<Vec<(String, String)>> {
     let query_mappings = rest_service.request.as_ref()?.query.as_ref()?;
-    let query = query_mappings
+    let mut query = query_mappings
         .iter()
         .filter_map(|(target_name, mapping)| {
             mapped_service_value(mapping, request_context).map(|value| (target_name.clone(), value))
         })
         .collect::<Vec<_>>();
+    query.sort_by(|(left, _), (right, _)| left.cmp(right));
 
     Some(query)
 }

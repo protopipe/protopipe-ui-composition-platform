@@ -971,6 +971,46 @@ async fn stream_page_until_first_body_chunk(world: &mut ComposerWorld, path: Str
     world.first_streamed_chunk = Some(String::from_utf8_lossy(&first_chunk).to_string());
 }
 
+#[when(regex = r"^I follow the response redirect$")]
+async fn follow_response_redirect(world: &mut ComposerWorld) {
+    let headers = world.last_headers.as_ref().expect("No response received");
+    let location = headers
+        .get(reqwest::header::LOCATION)
+        .expect("Response did not contain a Location header")
+        .to_str()
+        .expect("Location header is not valid text");
+
+    let url = if location.starts_with("http://") || location.starts_with("https://") {
+        location.to_string()
+    } else {
+        format!("{}:8080{}", world.base_url, location)
+    };
+    log::info!("Following redirect to: {}", url);
+
+    let client = world.client.as_ref().expect("HTTP client not initialized");
+    let started_at = Instant::now();
+    let response = client.get(&url).send().await;
+    world.last_request_duration = Some(started_at.elapsed());
+
+    match response {
+        Ok(resp) => {
+            world.last_status = Some(resp.status().as_u16());
+            world.last_headers = Some(resp.headers().clone());
+            world.last_response = Some(resp.text().await.unwrap_or_default());
+            log::debug!("Response status: {}", world.last_status.unwrap());
+            log::debug!(
+                "Response body length: {}",
+                world.last_response.as_ref().unwrap().len()
+            );
+        }
+        Err(e) => {
+            world.last_status = Some(0);
+            world.last_response = Some(format!("Error: {}", e));
+            log::error!("Redirect request failed: {}", e);
+        }
+    }
+}
+
 #[then(regex = r"^the response status should be (\d+)$")]
 async fn check_status(world: &mut ComposerWorld, expected_code: u16) {
     let actual = world.last_status.unwrap_or(0);
