@@ -44,6 +44,55 @@ Feature: REST service data
       When I request GET /product.html
       Then the response should contain "Trail Shoe"
 
+    Scenario: REST service request query parameters are mapped explicitly from the Composer request
+
+      Given a backend service "catalog"
+      And backend service "catalog" returns JSON for GET /products?produktNr=sku-123:
+        """
+        {
+          "produktNr": "sku-123",
+          "name": "Trail Shoe"
+        }
+        """
+      And a registered page config:
+        """
+        {
+          "path": "/product-by-number.html",
+          "page_id": "product-by-number",
+          "type": "rfa",
+          "template": "product",
+          "rfa": "p_product_by_number_v1",
+          "timeout_ms": 3000,
+          "data": {
+            "product": {
+              "type": "restService",
+              "service": "catalog",
+              "path": "/products",
+              "method": "GET",
+              "timeout_ms": 250,
+              "request": {
+                "query": {
+                  "produktNr": {
+                    "from": "query",
+                    "name": "produktNr"
+                  }
+                }
+              },
+              "error_default": {
+                "name": "Unknown product"
+              }
+            }
+          }
+        }
+        """
+      And a registered RFA "p_product_by_number_v1":
+        """
+        function(context) { return context.product.produktNr + " " + context.product.name; }
+        """
+      When I request GET /product-by-number.html?produktNr=sku-123
+      Then the response should contain "sku-123 Trail Shoe"
+      And backend service "catalog" should have received 1 request for GET /products?produktNr=sku-123
+
     Scenario: RFA receives runtime data resolved from the backend before execution
 
       Given a backend service "catalog"

@@ -39,7 +39,9 @@ async fn resolve_context_value(
     let item = match value {
         DataValue::Static(static_data) => static_data.value.clone(),
         DataValue::DynamicRest(dynamic) => dynamic.default.clone(),
-        DataValue::RestService(rest_service) => resolve_rest_service(state, rest_service).await,
+        DataValue::RestService(rest_service) => {
+            resolve_rest_service(state, rest_service, req).await
+        }
         DataValue::Url => Value::String(req.path().to_string()),
         DataValue::GetParameter(get_parameter) => query_params
             .get(&get_parameter.key)
@@ -53,6 +55,7 @@ async fn resolve_context_value(
 async fn resolve_rest_service(
     state: &AppState,
     rest_service: &crate::page::RestServiceData,
+    req: &HttpRequest,
 ) -> Value {
     let Some(service_config) = service::resolve_service(state, &rest_service.service) else {
         log::warn!("REST service not registered: {}", rest_service.service);
@@ -69,7 +72,10 @@ async fn resolve_rest_service(
     let url = service_url(&service_config.base_url, &rest_service.path);
     let timeout = Duration::from_millis(rest_service.timeout_ms.unwrap_or(1000));
     let client = reqwest::Client::new();
-    let request = client.request(method, &url);
+    let mut request = client.request(method, &url);
+    if let Some(query) = rest_service_query(rest_service, req) {
+        request = request.query(&query);
+    }
 
     match tokio::time::timeout(timeout, request.send()).await {
         Ok(Ok(response)) if response.status().is_success() => {
@@ -98,6 +104,40 @@ async fn resolve_rest_service(
             log::warn!("REST service request timed out at {}", url);
             rest_error_default(rest_service)
         }
+    }
+}
+
+fn rest_service_query(
+    rest_service: &crate::page::RestServiceData,
+    req: &HttpRequest,
+) -> Option<Vec<(String, String)>> {
+    let query_mappings = rest_service.request.as_ref()?.query.as_ref()?;
+    let request_query = query_params(req.query_string());
+    let query = query_mappings
+        .iter()
+        .filter_map(|(target_name, mapping)| {
+            mapped_service_value(mapping, &request_query).map(|value| (target_name.clone(), value))
+        })
+        .collect::<Vec<_>>();
+
+    Some(query)
+}
+
+fn mapped_service_value(
+    mapping: &crate::page::ServiceValueMapping,
+    request_query: &Value,
+) -> Option<String> {
+    match mapping.from {
+        crate::page::ServiceValueSource::Query => request_query_value(request_query, &mapping.name),
+    }
+}
+
+fn request_query_value(request_query: &Value, name: &str) -> Option<String> {
+    match request_query.get(name) {
+        Some(Value::String(value)) => Some(value.clone()),
+        Some(Value::Number(value)) => Some(value.to_string()),
+        Some(Value::Bool(value)) => Some(value.to_string()),
+        _ => None,
     }
 }
 
@@ -376,6 +416,7 @@ mod tests {
                 path: "/products/sku-123".to_string(),
                 method: Some("GET".to_string()),
                 timeout_ms: Some(250),
+                request: None,
                 error_default: Some(serde_json::json!({
                     "name": "Unknown product"
                 })),

@@ -31,7 +31,25 @@ pub struct RestServiceData {
     pub path: String,
     pub method: Option<String>,
     pub timeout_ms: Option<u64>,
+    pub request: Option<RestServiceRequest>,
     pub error_default: Option<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RestServiceRequest {
+    pub query: Option<HashMap<String, ServiceValueMapping>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ServiceValueMapping {
+    pub from: ServiceValueSource,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ServiceValueSource {
+    Query,
 }
 
 /// A POST service call used to process a submitted request.
