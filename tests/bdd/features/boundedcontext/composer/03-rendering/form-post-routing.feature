@@ -1,4 +1,3 @@
-@WIP
 Feature: Form POST routing
   As a product manager,
   I want the Composer to route submitted form data to one configured backend service,
