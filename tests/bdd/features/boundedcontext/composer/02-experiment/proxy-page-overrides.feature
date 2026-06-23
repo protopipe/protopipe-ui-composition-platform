@@ -1,3 +1,4 @@
+@WIP
 Feature: Experiment Proxy Page overrides
   As a product manager,
   I want an experiment variant to route a page through an upstream proxy delivery mode,
@@ -25,12 +26,7 @@ Feature: Experiment Proxy Page overrides
         """
       And an upstream monolith responds to GET /shop/cart with:
         """
-        <!doctype html>
-        <html>
-          <body>
-            <h1>Legacy cart from monolith</h1>
-          </body>
-        </html>
+        Legacy cart from monolith
         """
       And a registered experiment:
         """
@@ -60,7 +56,7 @@ Feature: Experiment Proxy Page overrides
       And I have accepted the experiment cookie "pp_experiment_cart_proxy_canary" with value "<variant_id>"
       And a registered RFA "cart-rfa":
         """
-        function(context) { return "<h1>Composer cart in " + context.currency + "</h1>"; }
+        function(context) { return "Composer cart in " + context.currency; }
         """
       When I request GET /shop/cart
       Then the response status should be 200

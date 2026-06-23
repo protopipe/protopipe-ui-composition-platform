@@ -19,10 +19,17 @@ pub(super) fn apply_overrides(
     apply_page_type(page_config, overrides);
     apply_template(page_config, overrides);
     apply_rfa(page_config, rfa_replacements, experiment_scope, overrides);
+    apply_delivery(page_config, overrides);
     apply_timeout(page_config, overrides);
     apply_content_type(page_config, overrides);
     apply_data(page_config, overrides);
     apply_interaction(page_config, overrides);
+}
+
+fn apply_delivery(page_config: &mut page::PageConfig, overrides: &PageOverrides) {
+    if let Some(delivery) = &overrides.delivery {
+        page_config.delivery = delivery.clone();
+    }
 }
 
 fn apply_page_type(page_config: &mut page::PageConfig, overrides: &PageOverrides) {
@@ -200,6 +207,7 @@ mod tests {
             page_type: page::PageType::Rfa,
             template: "template".to_string(),
             rfa: rfa.to_string(),
+            delivery: page::PageDelivery::Composer,
             timeout_ms: 3000,
             content_type: "text/html; charset=utf-8".to_string(),
             data: HashMap::new(),

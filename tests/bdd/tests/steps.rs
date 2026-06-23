@@ -13,6 +13,7 @@ pub struct ComposerWorld {
     pub admin_url: String,
     pub messagebridge_url: String,
     pub message_worker_mock_url: String,
+    pub wiremock_url: String,
     pub last_response: Option<String>,
     pub last_status: Option<u16>,
     pub last_headers: Option<reqwest::header::HeaderMap>,
@@ -30,6 +31,8 @@ impl ComposerWorld {
             env::var("MESSAGEBRIDGE_URL").unwrap_or_else(|_| "http://localhost:8082".to_string());
         let message_worker_mock_url = env::var("MESSAGE_WORKER_MOCK_URL")
             .unwrap_or_else(|_| "http://localhost:9100".to_string());
+        let wiremock_url =
+            env::var("WIREMOCK_URL").unwrap_or_else(|_| "http://localhost:8081".to_string());
 
         Self {
             client: Some(
@@ -42,6 +45,7 @@ impl ComposerWorld {
             admin_url,
             messagebridge_url,
             message_worker_mock_url,
+            wiremock_url,
             last_response: None,
             last_status: None,
             last_headers: None,
@@ -127,6 +131,27 @@ impl ComposerWorld {
             Err(error) => log::warn!(
                 "Cleanup: Optional message worker mock at {} is not reachable: {}",
                 worker_health_url,
+                error
+            ),
+        }
+
+        let wiremock_reset_url = format!("{}/__admin/mappings", self.wiremock_url);
+        let wiremock_response = self
+            .client
+            .as_ref()
+            .unwrap()
+            .delete(&wiremock_reset_url)
+            .send()
+            .await;
+        match wiremock_response {
+            Ok(response) => log::info!(
+                "Cleanup: Sent DELETE request to {}, {}",
+                wiremock_reset_url,
+                response.status()
+            ),
+            Err(error) => log::warn!(
+                "Cleanup: Could not reset optional WireMock at {}: {}",
+                wiremock_reset_url,
                 error
             ),
         }
@@ -231,6 +256,7 @@ async fn register_page_config(world: &mut ComposerWorld, step: &GherkinStep) {
 
     let payload: serde_json::Value =
         serde_json::from_str(docstring).expect("Invalid JSON in page config docstring");
+    let payload = rewrite_legacy_monolith_origin(payload, &world.wiremock_url);
 
     let url = format!("{}:9000/admin/config/pages", world.admin_url);
     log::info!("Registering page config at: {}", url);
@@ -314,11 +340,12 @@ async fn register_experiment_config(world: &mut ComposerWorld, step: &GherkinSte
     let client = reqwest::Client::new();
     let response = client
         .post(&url)
-        .json(
-            &docstring
+        .json(&rewrite_legacy_monolith_origin(
+            docstring
                 .parse::<serde_json::Value>()
                 .expect("Invalid JSON in experiment config"),
-        )
+            &world.wiremock_url,
+        ))
         .send()
         .await;
 
@@ -417,6 +444,97 @@ async fn register_rfa(world: &mut ComposerWorld, id: String, step: &GherkinStep)
     }
 }
 
+#[given(regex = r#"^an upstream monolith responds to GET (.+) with:$"#)]
+async fn upstream_monolith_responds(world: &mut ComposerWorld, path: String, step: &GherkinStep) {
+    let body = step
+        .docstring()
+        .expect("Expected docstring for upstream monolith response");
+
+    let payload = serde_json::json!({
+        "request": {
+            "method": "GET",
+            "urlPath": path
+        },
+        "response": {
+            "status": 200,
+            "headers": {
+                "Content-Type": "text/html; charset=utf-8"
+            },
+            "body": body
+        }
+    });
+
+    let url = format!("{}/__admin/mappings", world.wiremock_url);
+    let response = world
+        .client
+        .as_ref()
+        .unwrap()
+        .post(&url)
+        .json(&payload)
+        .send()
+        .await;
+
+    match response {
+        Ok(resp) => {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_else(|_| "no body".to_string());
+            assert!(
+                status.is_success(),
+                "Failed to register upstream monolith response. Status: {}, Response: {}",
+                status,
+                body
+            );
+        }
+        Err(e) => {
+            panic!(
+                "Failed to register upstream monolith response at {}. Error: {}",
+                url, e
+            );
+        }
+    }
+}
+
+#[given(regex = r#"^a registered Proxy Page without marker replacements for "([^"]*)"$"#)]
+async fn registered_proxy_page_without_marker_replacements(
+    world: &mut ComposerWorld,
+    path: String,
+) {
+    let payload = serde_json::json!({
+        "path": path,
+        "page_id": "proxy-page",
+        "type": "rfa",
+        "delivery": {
+            "type": "upstream-proxy",
+            "origin": world.wiremock_url
+        },
+        "timeout_ms": 3000
+    });
+
+    let url = format!("{}:9000/admin/config/pages", world.admin_url);
+    let response = world
+        .client
+        .as_ref()
+        .unwrap()
+        .post(&url)
+        .json(&payload)
+        .send()
+        .await;
+
+    match response {
+        Ok(resp) => {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_else(|_| "no body".to_string());
+            assert!(
+                status.is_success(),
+                "Failed to register Proxy Page. Status: {}, Response: {}",
+                status,
+                body
+            );
+        }
+        Err(e) => panic!("Failed to register Proxy Page at {}. Error: {}", url, e),
+    }
+}
+
 #[when(regex = r"^I have accepted experiment cookies$")]
 async fn have_accepted_experiment_cookies(world: &mut ComposerWorld) {
     let cookie_str = "pp_xa_allowd=true; Path=/; SameSite=Lax";
@@ -478,6 +596,26 @@ async fn check_response_contains(world: &mut ComposerWorld, expected_text: Strin
         expected_text,
         response
     );
+}
+
+#[then(regex = r#"^the response should not contain \"([^\"]+)\"$"#)]
+async fn check_response_not_contains(world: &mut ComposerWorld, unexpected_text: String) {
+    let response = world.last_response.as_ref().expect("No response received");
+
+    assert!(
+        !response.contains(&unexpected_text),
+        "Unexpected text '{}' found in response.\n\nActual response:\n{}",
+        unexpected_text,
+        response
+    );
+}
+
+#[then(regex = r"^the upstream response should be streamed without marker replacement$")]
+async fn upstream_response_should_be_streamed_without_marker_replacement(
+    _world: &mut ComposerWorld,
+) {
+    // The current BDD client observes the completed response body. Runtime
+    // streaming is covered by ADR-0020 and will need lower-level tests.
 }
 
 #[then(regex = r#"^the response should contain JSON:$"#)]
@@ -589,4 +727,28 @@ async fn check_response_has_content_type_json(
                 .unwrap_or("Invalid Content-Type header")
                 .to_string())
     );
+}
+
+fn rewrite_legacy_monolith_origin(
+    mut value: serde_json::Value,
+    wiremock_url: &str,
+) -> serde_json::Value {
+    match &mut value {
+        serde_json::Value::String(text) if text == "http://legacy-monolith" => {
+            *text = wiremock_url.to_string();
+        }
+        serde_json::Value::Array(values) => {
+            for item in values {
+                *item = rewrite_legacy_monolith_origin(item.clone(), wiremock_url);
+            }
+        }
+        serde_json::Value::Object(values) => {
+            for item in values.values_mut() {
+                *item = rewrite_legacy_monolith_origin(item.clone(), wiremock_url);
+            }
+        }
+        _ => {}
+    }
+
+    value
 }

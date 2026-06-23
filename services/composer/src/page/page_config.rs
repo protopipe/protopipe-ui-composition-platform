@@ -41,6 +41,36 @@ pub enum PageType {
     Ifa,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum PageDelivery {
+    Composer,
+    UpstreamProxy {
+        origin: String,
+        #[serde(default)]
+        markers: Vec<ProxyMarkerReplacement>,
+    },
+}
+
+impl Default for PageDelivery {
+    fn default() -> Self {
+        Self::Composer
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ProxyMarkerReplacement {
+    pub id: String,
+    pub rfa: String,
+    #[serde(default = "default_proxy_marker_fallback")]
+    pub fallback: String,
+}
+
+fn default_proxy_marker_fallback() -> String {
+    "keep-upstream".to_string()
+}
+
 /// Page configuration with structured data values.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PageConfig {
@@ -50,6 +80,7 @@ pub struct PageConfig {
     pub page_type: PageType,
     pub template: String,
     pub rfa: String,
+    pub delivery: PageDelivery,
     pub timeout_ms: u64,
     pub content_type: String,
     pub data: HashMap<String, DataValue>,
@@ -64,8 +95,9 @@ pub struct PageConfigDto {
     pub page_id: String,
     #[serde(rename = "type")]
     pub page_type: PageType,
-    pub template: String,
-    pub rfa: String,
+    pub template: Option<String>,
+    pub rfa: Option<String>,
+    pub delivery: Option<PageDelivery>,
     pub timeout_ms: u64,
     pub content_type: Option<String>,
     pub data: Option<PageDataDto>,
@@ -104,11 +136,35 @@ pub async fn reset_pages(state: web::Data<AppState>) {
 }
 
 pub fn validate_page_config(config: &PageConfig) -> Result<(), &'static str> {
+    validate_page_delivery(config)?;
     validate_page_interaction(&config.page_type, config.interaction.is_some())
 }
 
 fn validate_page_config_dto(config: &PageConfigDto) -> Result<(), &'static str> {
+    validate_page_delivery_dto(config)?;
     validate_page_interaction(&config.page_type, config.interaction.is_some())
+}
+
+fn validate_page_delivery(config: &PageConfig) -> Result<(), &'static str> {
+    match &config.delivery {
+        PageDelivery::Composer if config.rfa.is_empty() => Err("Composer pages must define an RFA"),
+        PageDelivery::UpstreamProxy { origin, .. } if origin.is_empty() => {
+            Err("Proxy pages must define an upstream origin")
+        }
+        _ => Ok(()),
+    }
+}
+
+fn validate_page_delivery_dto(config: &PageConfigDto) -> Result<(), &'static str> {
+    match config.delivery.as_ref().unwrap_or(&PageDelivery::Composer) {
+        PageDelivery::Composer if config.rfa.as_deref().unwrap_or_default().is_empty() => {
+            Err("Composer pages must define an RFA")
+        }
+        PageDelivery::UpstreamProxy { origin, .. } if origin.is_empty() => {
+            Err("Proxy pages must define an upstream origin")
+        }
+        _ => Ok(()),
+    }
 }
 
 fn validate_page_interaction(
@@ -127,8 +183,9 @@ fn page_config_from_dto(config: &PageConfigDto) -> PageConfig {
         path: config.path.clone(),
         page_id: config.page_id.clone(),
         page_type: config.page_type.clone(),
-        template: config.template.clone(),
-        rfa: config.rfa.clone(),
+        template: config.template.clone().unwrap_or_default(),
+        rfa: config.rfa.clone().unwrap_or_default(),
+        delivery: config.delivery.clone().unwrap_or_default(),
         timeout_ms: config.timeout_ms,
         content_type: config
             .content_type
@@ -149,8 +206,9 @@ fn page_config_to_dto(config: &PageConfig) -> PageConfigDto {
         path: config.path.clone(),
         page_id: config.page_id.clone(),
         page_type: config.page_type.clone(),
-        template: config.template.clone(),
-        rfa: config.rfa.clone(),
+        template: Some(config.template.clone()),
+        rfa: Some(config.rfa.clone()),
+        delivery: Some(config.delivery.clone()),
         timeout_ms: config.timeout_ms,
         content_type: Some(config.content_type.clone()),
         data: Some(config.data.clone().into_iter().collect()),
@@ -188,8 +246,9 @@ mod tests {
             path: "/index.html".to_string(),
             page_id: "landing".to_string(),
             page_type: PageType::Rfa,
-            template: "landing".to_string(),
-            rfa: "landing_v1".to_string(),
+            template: Some("landing".to_string()),
+            rfa: Some("landing_v1".to_string()),
+            delivery: None,
             timeout_ms: 1000,
             content_type: None,
             data: None,
@@ -207,6 +266,7 @@ mod tests {
             page_type,
             template: "landing".to_string(),
             rfa: "landing_v1".to_string(),
+            delivery: PageDelivery::Composer,
             timeout_ms: 1000,
             content_type: "text/html; charset=utf-8".to_string(),
             data: HashMap::new(),

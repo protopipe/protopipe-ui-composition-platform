@@ -10,7 +10,7 @@ use crate::AppState;
 #[allow(unused_imports)]
 pub use page_config::{
     validate_page_config, DataValue, DynamicRestData, GetParameterData, PageConfig, PageConfigDto,
-    PageDataDto, PageType, StaticData,
+    PageDataDto, PageDelivery, PageType, ProxyMarkerReplacement, StaticData,
 };
 pub use page_resolver::request_target;
 pub use rfa_config::{RFAConfig, RFAConfigDto};

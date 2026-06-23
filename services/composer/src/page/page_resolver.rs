@@ -220,6 +220,7 @@ mod tests {
             page_type: PageType::Rfa,
             template: "landing".to_string(),
             rfa: "landing_v1".to_string(),
+            delivery: crate::page::PageDelivery::Composer,
             timeout_ms: 1000,
             content_type: "text/html; charset=utf-8".to_string(),
             data: HashMap::new(),

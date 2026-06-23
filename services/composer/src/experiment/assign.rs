@@ -176,6 +176,7 @@ mod tests {
             page_type: page::PageType::Rfa,
             template: "template".to_string(),
             rfa: rfa.to_string(),
+            delivery: page::PageDelivery::Composer,
             timeout_ms: 3000,
             content_type: "text/html; charset=utf-8".to_string(),
             data: HashMap::new(),

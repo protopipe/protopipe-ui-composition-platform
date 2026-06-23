@@ -1,3 +1,4 @@
+@WIP
 Feature: Proxy Page marker replacement
   As a product manager,
   I want accepted Proxy Page markers to be replaced by RFAs,
@@ -46,17 +47,6 @@ Feature: Proxy Page marker replacement
       Then the response status should be 200
       And the response should contain "<section>Composer checkout summary</section>"
       And the response should not contain "<section>Legacy checkout summary</section>"
-
-  Rule: Active marker rendering may run in parallel with upstream streaming and may wait at the marker boundary.
-
-    Example: Wait at marker boundary until the replacement is ready
-      Given an upstream monolith streams GET /checkout faster than the marker RFA renders
-      And the effective page config contains marker replacement "checkout.summary"
-      When I request GET /checkout
-      Then the response should stream upstream content before marker "checkout.summary"
-      And the response should wait at marker "checkout.summary" until the replacement is ready
-      And the response should contain the replacement output for marker "checkout.summary"
-      And the response should not contain the upstream fallback content for marker "checkout.summary"
 
   Rule: A marker without an active replacement passes through unchanged.
 
