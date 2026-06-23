@@ -1,4 +1,9 @@
+use std::io;
+
 use actix_web::{web, HttpRequest, HttpResponse};
+use futures::{Stream, StreamExt};
+use tokio::task::JoinHandle;
+use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{contextloader, experiment, page, AppState};
 
@@ -48,7 +53,7 @@ async fn render_resolved_page(
             Ok(ok_response(&page_config, &resolved_page_config, rendered))
         }
         page::PageDelivery::UpstreamProxy { origin, markers } => {
-            let rendered = render_proxy_page(
+            render_proxy_page_response(
                 state,
                 req,
                 &page_config,
@@ -56,8 +61,7 @@ async fn render_resolved_page(
                 origin,
                 markers,
             )
-            .await?;
-            Ok(ok_response(&page_config, &resolved_page_config, rendered))
+            .await
         }
     }
 }
@@ -96,46 +100,67 @@ async fn render_rfa(
         .map_err(|err| rfa_execution_failed(&err.to_string()))
 }
 
-async fn render_proxy_page(
+async fn render_proxy_page_response(
     state: &web::Data<AppState>,
     req: &HttpRequest,
     page_config: &page::PageConfig,
     resolved_page_config: &experiment::ResolvedPageConfig,
     origin: &str,
     markers: &[page::ProxyMarkerReplacement],
-) -> Result<String, HttpResponse> {
-    let upstream_body = fetch_upstream(origin, req)
+) -> Result<HttpResponse, HttpResponse> {
+    let replacement_tasks =
+        start_marker_replacements(state, req, page_config, resolved_page_config, markers)?;
+
+    let upstream_response = fetch_upstream(origin, req)
         .await
         .map_err(|err| upstream_failed(&err.to_string()))?;
 
-    if markers.is_empty() {
-        return Ok(upstream_body);
-    }
+    let body_stream =
+        stream_marker_replacements(upstream_response.bytes_stream(), replacement_tasks);
 
+    let mut response = HttpResponse::Ok();
+    response.content_type(page_config.content_type.clone());
+    add_assignment_cookie(&mut response, resolved_page_config);
+    Ok(response.streaming(body_stream))
+}
+
+fn start_marker_replacements(
+    state: &web::Data<AppState>,
+    req: &HttpRequest,
+    page_config: &page::PageConfig,
+    resolved_page_config: &experiment::ResolvedPageConfig,
+    markers: &[page::ProxyMarkerReplacement],
+) -> Result<Vec<ActiveMarkerReplacement>, HttpResponse> {
     let context = contextloader::build_context(&page_config.data, req);
-    let mut rendered_body = upstream_body;
+    let mut replacements = Vec::new();
 
     for marker in markers {
         validate_marker_rfa_exists(state, marker)?;
-        let replacement = state
-            .render_pool
-            .render(
-                &marker.rfa,
-                &context,
-                &resolved_page_config.rfa_replacements,
-            )
-            .await
-            .map_err(|err| rfa_execution_failed(&err.to_string()))?;
+        let render_pool = state.render_pool.clone();
+        let rfa = marker.rfa.clone();
+        let context = context.clone();
+        let rfa_replacements = resolved_page_config.rfa_replacements.clone();
 
-        rendered_body = replace_marker_region(&rendered_body, &marker.id, &replacement);
+        replacements.push(ActiveMarkerReplacement {
+            id: marker.id.clone(),
+            task: tokio::spawn(async move {
+                render_pool
+                    .render(&rfa, &context, &rfa_replacements)
+                    .await
+                    .map_err(|err| err.to_string())
+            }),
+        });
     }
 
-    Ok(rendered_body)
+    Ok(replacements)
 }
 
-async fn fetch_upstream(origin: &str, req: &HttpRequest) -> Result<String, reqwest::Error> {
+async fn fetch_upstream(
+    origin: &str,
+    req: &HttpRequest,
+) -> Result<reqwest::Response, reqwest::Error> {
     let target = upstream_target(origin, req);
-    reqwest::get(target).await?.text().await
+    reqwest::get(target).await
 }
 
 fn upstream_target(origin: &str, req: &HttpRequest) -> String {
@@ -158,27 +183,185 @@ fn validate_marker_rfa_exists(
         .ok_or_else(|| missing_rfa(&marker.rfa))
 }
 
-fn replace_marker_region(body: &str, marker_id: &str, replacement: &str) -> String {
-    let start_marker = format!("<!-- protopipe:marker {marker_id} -->");
-    let end_marker = format!("<!-- /protopipe:marker {marker_id} -->");
+struct ActiveMarkerReplacement {
+    id: String,
+    task: JoinHandle<Result<String, String>>,
+}
 
-    let Some(start_index) = body.find(&start_marker) else {
-        return body.to_string();
-    };
+struct StreamMarkerReplacement {
+    start_marker: String,
+    end_marker: String,
+    task: Option<JoinHandle<Result<String, String>>>,
+}
 
-    let content_start = start_index + start_marker.len();
-    let Some(relative_end_index) = body[content_start..].find(&end_marker) else {
-        return body.to_string();
-    };
+fn stream_marker_replacements<S, E>(
+    upstream: S,
+    replacements: Vec<ActiveMarkerReplacement>,
+) -> ReceiverStream<Result<web::Bytes, io::Error>>
+where
+    S: Stream<Item = Result<web::Bytes, E>> + Send + 'static,
+    E: std::fmt::Display + Send + 'static,
+{
+    let (sender, receiver) = tokio::sync::mpsc::channel(16);
 
-    let end_index = content_start + relative_end_index + end_marker.len();
+    tokio::spawn(async move {
+        let mut upstream = Box::pin(upstream);
+        let mut replacements = replacements
+            .into_iter()
+            .map(|replacement| StreamMarkerReplacement {
+                start_marker: marker_start(&replacement.id),
+                end_marker: marker_end(&replacement.id),
+                task: Some(replacement.task),
+            })
+            .collect::<Vec<_>>();
+        let mut buffer = String::new();
 
-    format!(
-        "{}{}{}",
-        &body[..start_index],
-        replacement,
-        &body[end_index..]
-    )
+        while let Some(chunk) = upstream.next().await {
+            match chunk {
+                Ok(bytes) => buffer.push_str(&String::from_utf8_lossy(&bytes)),
+                Err(err) => {
+                    send_stream_error(&sender, err.to_string()).await;
+                    return;
+                }
+            }
+
+            if !flush_available_proxy_content(&sender, &mut buffer, &mut replacements).await {
+                return;
+            }
+        }
+
+        if !buffer.is_empty() {
+            let _ = sender.send(Ok(web::Bytes::from(buffer))).await;
+        }
+    });
+
+    ReceiverStream::new(receiver)
+}
+
+async fn flush_available_proxy_content(
+    sender: &tokio::sync::mpsc::Sender<Result<web::Bytes, io::Error>>,
+    buffer: &mut String,
+    replacements: &mut [StreamMarkerReplacement],
+) -> bool {
+    loop {
+        if let Some(marker_match) = find_next_marker(buffer, replacements) {
+            if marker_match.start_index > 0 {
+                let prefix = buffer[..marker_match.start_index].to_string();
+                buffer.drain(..marker_match.start_index);
+                if sender.send(Ok(web::Bytes::from(prefix))).await.is_err() {
+                    return false;
+                }
+            }
+
+            let marker = &mut replacements[marker_match.replacement_index];
+            let content_start = marker.start_marker.len();
+            let Some(relative_end_index) = buffer[content_start..].find(&marker.end_marker) else {
+                return true;
+            };
+
+            let replacement_end = content_start + relative_end_index + marker.end_marker.len();
+            let fallback_region = buffer[..replacement_end].to_string();
+            let task = marker.task.take();
+
+            let replacement = match task {
+                Some(task) => match task.await {
+                    Ok(Ok(rendered)) => rendered,
+                    Ok(Err(err)) => {
+                        log::warn!("Marker replacement failed: {}", err);
+                        fallback_region.clone()
+                    }
+                    Err(err) => {
+                        log::warn!("Marker replacement task failed: {}", err);
+                        fallback_region.clone()
+                    }
+                },
+                None => fallback_region.clone(),
+            };
+
+            buffer.drain(..replacement_end);
+            if sender
+                .send(Ok(web::Bytes::from(replacement)))
+                .await
+                .is_err()
+            {
+                return false;
+            }
+
+            continue;
+        }
+
+        let safe_len = safe_flush_len(buffer, replacements);
+        if safe_len > 0 {
+            let prefix = buffer[..safe_len].to_string();
+            buffer.drain(..safe_len);
+            if sender.send(Ok(web::Bytes::from(prefix))).await.is_err() {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
+
+struct MarkerMatch {
+    replacement_index: usize,
+    start_index: usize,
+}
+
+fn find_next_marker(buffer: &str, replacements: &[StreamMarkerReplacement]) -> Option<MarkerMatch> {
+    replacements
+        .iter()
+        .enumerate()
+        .filter(|(_, replacement)| replacement.task.is_some())
+        .filter_map(|(index, replacement)| {
+            buffer
+                .find(&replacement.start_marker)
+                .map(|start_index| MarkerMatch {
+                    replacement_index: index,
+                    start_index,
+                })
+        })
+        .min_by_key(|marker_match| marker_match.start_index)
+}
+
+fn safe_flush_len(buffer: &str, replacements: &[StreamMarkerReplacement]) -> usize {
+    let keep_len = replacements
+        .iter()
+        .filter(|replacement| replacement.task.is_some())
+        .map(|replacement| replacement.start_marker.len().saturating_sub(1))
+        .max()
+        .unwrap_or(0);
+
+    if buffer.len() <= keep_len {
+        return 0;
+    }
+
+    previous_char_boundary(buffer, buffer.len() - keep_len)
+}
+
+fn previous_char_boundary(value: &str, index: usize) -> usize {
+    let mut index = index.min(value.len());
+    while index > 0 && !value.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
+}
+
+async fn send_stream_error(
+    sender: &tokio::sync::mpsc::Sender<Result<web::Bytes, io::Error>>,
+    message: String,
+) {
+    let _ = sender
+        .send(Err(io::Error::new(io::ErrorKind::Other, message)))
+        .await;
+}
+
+fn marker_start(marker_id: &str) -> String {
+    format!("<!-- protopipe:marker {marker_id} -->")
+}
+
+fn marker_end(marker_id: &str) -> String {
+    format!("<!-- /protopipe:marker {marker_id} -->")
 }
 
 fn ok_response(
@@ -232,25 +415,85 @@ fn internal_error(prefix: &str, message: &str) -> HttpResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
-    #[test]
-    fn marker_region_is_replaced() {
-        let body = "<h1>Checkout</h1><!-- protopipe:marker checkout.summary --><section>Legacy</section><!-- /protopipe:marker checkout.summary -->";
+    use futures::stream;
+    use tokio::sync::oneshot;
 
-        let rendered =
-            replace_marker_region(body, "checkout.summary", "<section>Composer</section>");
+    #[actix_rt::test]
+    async fn proxy_stream_flushes_prefix_before_waiting_for_marker_replacement() {
+        let (release_replacement, wait_for_release) = oneshot::channel();
+        let replacement_task = tokio::spawn(async move {
+            wait_for_release.await.unwrap();
+            Ok("replacement".to_string())
+        });
+        let upstream = stream::iter(vec![Ok::<_, io::Error>(web::Bytes::from(
+            "prefix <!-- protopipe:marker checkout.summary -->legacy<!-- /protopipe:marker checkout.summary --> suffix",
+        ))]);
 
-        assert!(rendered.contains("<section>Composer</section>"));
-        assert!(!rendered.contains("<section>Legacy</section>"));
+        let mut stream = stream_marker_replacements(
+            upstream,
+            vec![ActiveMarkerReplacement {
+                id: "checkout.summary".to_string(),
+                task: replacement_task,
+            }],
+        );
+
+        assert_eq!(next_chunk(&mut stream).await, "prefix ");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), stream.next())
+                .await
+                .is_err(),
+            "stream should wait at the marker while replacement rendering is pending"
+        );
+
+        release_replacement.send(()).unwrap();
+
+        assert_eq!(next_chunk(&mut stream).await, "replacement");
+        assert_eq!(next_chunk(&mut stream).await, " suffix");
+        assert!(stream.next().await.is_none());
     }
 
-    #[test]
-    fn missing_marker_passes_body_through() {
-        let body = "<h1>Checkout</h1>";
+    #[actix_rt::test]
+    async fn proxy_stream_preserves_marker_split_across_upstream_chunks() {
+        let replacement_task = tokio::spawn(async { Ok("replacement".to_string()) });
+        let upstream = stream::iter(vec![
+            Ok::<_, io::Error>(web::Bytes::from("prefix <!-- protopipe:mar")),
+            Ok::<_, io::Error>(web::Bytes::from(
+                "ker checkout.summary -->legacy<!-- /protopipe:marker checkout.summary --> suffix",
+            )),
+        ]);
 
-        assert_eq!(
-            replace_marker_region(body, "checkout.summary", "<section>Composer</section>"),
-            body
+        let mut stream = stream_marker_replacements(
+            upstream,
+            vec![ActiveMarkerReplacement {
+                id: "checkout.summary".to_string(),
+                task: replacement_task,
+            }],
         );
+
+        let mut rendered = String::new();
+        while let Some(chunk) = stream.next().await {
+            rendered.push_str(std::str::from_utf8(&chunk.unwrap()).unwrap());
+        }
+
+        assert_eq!(rendered, "prefix replacement suffix");
+    }
+
+    #[actix_rt::test]
+    async fn proxy_stream_passes_through_when_no_replacement_is_active() {
+        let upstream = stream::iter(vec![Ok::<_, io::Error>(web::Bytes::from(
+            "<h1>Checkout</h1>",
+        ))]);
+
+        let mut stream = stream_marker_replacements(upstream, Vec::new());
+
+        assert_eq!(next_chunk(&mut stream).await, "<h1>Checkout</h1>");
+        assert!(stream.next().await.is_none());
+    }
+
+    async fn next_chunk(stream: &mut ReceiverStream<Result<web::Bytes, io::Error>>) -> String {
+        let chunk = stream.next().await.unwrap().unwrap();
+        std::str::from_utf8(&chunk).unwrap().to_string()
     }
 }
