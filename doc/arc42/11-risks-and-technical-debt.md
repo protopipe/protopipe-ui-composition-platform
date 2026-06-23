@@ -88,6 +88,21 @@
 - Comprehensive error handling and logging
 - Testing against failure scenarios
 
+### 8. Proxy Page Streaming and Marker Replacement
+
+**Risk**: Proxy Pages add upstream HTTP proxying, streaming marker parsing, and
+marker-boundary waiting to the Composer runtime.
+
+**Impact**: Medium-High (affects migration pages and perceived latency)
+
+**Mitigation** (see [ADR-0020](../adr/0020-support-proxy-page-markers-as-stable-and-experimental-composition-points.md)):
+- Keep upstream fallback content as the default failure behavior during
+  migration
+- Measure marker wait time, upstream latency, RFA latency, replacement count,
+  and fallback count separately
+- Validate marker configuration with BDD and contract tests
+- Bound marker wait time through explicit per-marker timeout policies
+
 ## Technical Debt
 
 ### 1. RFA Isolation

@@ -7,6 +7,7 @@ use crate::{experiment, page};
 
 use super::worker;
 
+#[derive(Clone)]
 pub struct RenderPool {
     render_sender: Sender<RenderRequest>,
     admin_senders: Vec<Sender<AdminCommand>>,

@@ -30,5 +30,17 @@ nav:
       - ADR-0004: adr/0004-use-artifact-based-experiments-instead-of-feature-toggles-in-product-code.md
       - ADR-0005: adr/0005-keep-metrics-in-prometheus-avoid-counters-in-crd-status.md
       - ADR-0006: adr/0006-adopt-docs-as-code-with-arc42-chapters-and-plantuml-diagrams.md
-      - ADR-0007: adr/0007-establish-adr-governance-and-lifecycle.md
-
+      - ADR-0007: adr/0007-ssr-first-rendering-model.md
+      - ADR-0008: adr/0008-centralize-experiment-routing-before-rendering.md
+      - ADR-0009: adr/0009-use-default-variant-when-no-consent-is-given.md
+      - ADR-0010: adr/0010-seperate-observability-from-experiment-analytics.md
+      - ADR-0011: adr/0011-use-event-based-interaction-model-for-ui-artifacts.md
+      - ADR-0012: adr/0012-define-interaction-event-lifecyle.md
+      - ADR-0013: adr/0013-distinguish-render-and-interactive-ui-artifacts.md
+      - ADR-0014: adr/0014-use-buffered-polling-based-event-delivery.md
+      - ADR-0015: adr/0015-separate-experiment-assignment-from-interaction-channel-selection.md
+      - ADR-0016: adr/0016-define-message-bridge-instances-and-chaining.md
+      - ADR-0017: adr/0017-use-buffered-http-batch-delivery-for-message-bridges.md
+      - ADR-0018: adr/0018-use-internal-brokers-and-governed-business-event-sourcing.md
+      - ADR-0019: adr/0019-use-state-carrying-business-events-for-shadow-and-experiment-services.md
+      - ADR-0020: adr/0020-support-proxy-page-markers-as-stable-and-experimental-composition-points.md

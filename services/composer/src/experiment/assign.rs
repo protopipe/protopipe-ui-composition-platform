@@ -2,11 +2,10 @@ use actix_web::{
     cookie::{Cookie, SameSite},
     HttpRequest,
 };
-use std::collections::HashMap;
 
 use crate::page;
 
-use super::config::{ExperimentConfig, ExperimentScope, Variant};
+use super::config::{ExperimentConfig, Variant};
 
 const EXPERIMENT_COOKIE_CONSENT: &str = "pp_xa_allowd";
 
@@ -155,7 +154,9 @@ fn namespace_can_apply_to_page(pattern: &str, root_namespace: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::super::config::{PageOverrides, Variant};
+    use std::collections::HashMap;
+
+    use super::super::config::{ExperimentScope, PageOverrides, Variant};
     use super::*;
 
     fn experiment_with_scope(path: Option<&str>, namespace: Option<&str>) -> ExperimentConfig {
@@ -176,6 +177,7 @@ mod tests {
             page_type: page::PageType::Rfa,
             template: "template".to_string(),
             rfa: rfa.to_string(),
+            delivery: page::PageDelivery::Composer,
             timeout_ms: 3000,
             content_type: "text/html; charset=utf-8".to_string(),
             data: HashMap::new(),
