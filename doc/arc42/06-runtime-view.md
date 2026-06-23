@@ -59,3 +59,27 @@ Client-side logic is **optional and non-authoritative**:
 - Interactive UI features are handled via interactive artifacts (see [ADR-0013](../adr/0013-distinguish-render-and-interactive-ui-artifacts.md))
 - Event-based interaction model (see [ADR-0011](../adr/0011-use-event-based-interaction-model-for-ui-artifacts.md))
 
+## Proxy Page Rendering Flow
+
+Proxy Pages support monolith decomposition through streamed upstream responses
+and marker replacement (see
+[ADR-0020](../adr/0020-support-proxy-page-markers-as-stable-and-experimental-composition-points.md)).
+
+```text
+Request
+ → Page Resolution
+ → Experiment Assignment
+ → Effective Proxy Page Configuration
+ → Upstream Request
+ → Data Loading and RFA Rendering for Active Markers (parallel)
+ → Streaming Marker Detection
+ → Marker Replacement or Fallback
+ → Streamed HTML Response
+ → Telemetry Emission
+```
+
+The Composer forwards upstream bytes as early as possible. For active marker
+replacements, it starts data loading and RFA rendering in parallel with upstream
+streaming. If the upstream response reaches a configured marker before the
+replacement is ready, the Composer may wait at that marker until the RFA output,
+timeout, or fallback decision is available.

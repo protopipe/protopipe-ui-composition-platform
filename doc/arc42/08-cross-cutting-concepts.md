@@ -98,10 +98,25 @@ Buffered, polling-based event delivery (see [ADR-0014](../adr/0014-use-buffered-
 See [ADR-0004](../adr/0004-use-artifact-based-experiments-instead-of-feature-toggles-in-product-code.md) and [ADR-0008](../adr/0008-centralize-experiment-routing-before-rendering.md).
 
 - Experiments route to different artifact implementations
+- Experiments may introduce candidate Proxy Marker replacements for monolith
+  migration, canaries, and A/B tests (see [ADR-0020](../adr/0020-support-proxy-page-markers-as-stable-and-experimental-composition-points.md))
 - No feature toggles inside product code
 - Snapshot artifacts are pinned and promoted without modifying merged code
 - Experiment assignment is centralized and happens before rendering (see [ADR-0008](../adr/0008-centralize-experiment-routing-before-rendering.md))
 - If no consent is given: assign default (control) variant (see [ADR-0009](../adr/0009-use-default-variant-when-no-consent-is-given.md))
+
+## Proxy Page Marker Replacement
+
+Proxy Page marker replacement is a server-side migration mechanism for
+decomposing monolith-rendered pages. HTML comment markers define inert
+composition points in upstream responses. Page configuration owns accepted
+marker replacements, while Experiment variants may add candidate marker
+replacements to the effective Page configuration.
+
+Proxy Page responses are streamed. Data loading and RFA rendering for active
+marker replacements happen in parallel with upstream streaming where possible.
+At a marker boundary, the Composer delivers either the rendered replacement or
+the upstream fallback region, never both.
 
 ## Telemetry: Observability vs Analytics
 

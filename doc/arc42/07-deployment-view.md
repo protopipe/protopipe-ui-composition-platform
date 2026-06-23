@@ -14,6 +14,8 @@ The platform is deployed as a set of Kubernetes resources:
 
 - Stateless HTTP service for page composition
 - Executes RFAs, loads templates, resolves slots
+- Streams Proxy Page upstream responses and replaces configured marker regions
+  when effective Page configuration contains active proxy marker replacements
 - Receives requests from users or edge caches
 - Emits observability and experiment analytics (separated per [ADR-0010](../adr/0010-seperate-observability-from-experiment-analytics.md))
 
@@ -51,6 +53,9 @@ The platform is deployed as a set of Kubernetes resources:
 - Stored in etcd (Kubernetes API server)
 - Updated via GitOps workflows
 - Changes are versioned and auditable
+- Proxy Pages may reference upstream origins and accepted marker replacements;
+  Experiments may add candidate marker replacements to the effective runtime
+  configuration (see [ADR-0020](../adr/0020-support-proxy-page-markers-as-stable-and-experimental-composition-points.md))
 
 ## Observability Stack
 
