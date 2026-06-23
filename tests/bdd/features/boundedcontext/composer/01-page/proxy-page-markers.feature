@@ -1,4 +1,3 @@
-@WIP
 Feature: Proxy Page marker replacement
   As a product manager,
   I want accepted Proxy Page markers to be replaced by RFAs,

@@ -1,4 +1,3 @@
-@WIP
 Feature: Experiment Proxy Page overrides
   As a product manager,
   I want an experiment variant to route a page through an upstream proxy delivery mode,

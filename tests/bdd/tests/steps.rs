@@ -1,9 +1,10 @@
 use cucumber::{gherkin::Step as GherkinStep, given, then, when};
+use futures::StreamExt;
 use reqwest::cookie::Jar;
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(cucumber::World, Debug)]
 #[world(init = ComposerWorld::new)]
@@ -17,6 +18,8 @@ pub struct ComposerWorld {
     pub last_response: Option<String>,
     pub last_status: Option<u16>,
     pub last_headers: Option<reqwest::header::HeaderMap>,
+    pub first_streamed_chunk: Option<String>,
+    pub first_streamed_chunk_elapsed_ms: Option<u128>,
     pub cookie_jar: Arc<Jar>,
     pub page_config: HashMap<String, String>,
 }
@@ -49,6 +52,8 @@ impl ComposerWorld {
             last_response: None,
             last_status: None,
             last_headers: None,
+            first_streamed_chunk: None,
+            first_streamed_chunk_elapsed_ms: None,
             cookie_jar: jar,
             page_config: HashMap::new(),
         }
@@ -72,25 +77,48 @@ impl ComposerWorld {
             response.unwrap().status()
         );
 
-        wait_for_http(
-            self.client.as_ref().unwrap(),
-            &format!("{}/health", self.messagebridge_url),
-        )
-        .await;
-
+        let messagebridge_health_url = format!("{}/health", self.messagebridge_url);
         let messagebridge_reset_url = format!("{}/admin/config", self.messagebridge_url);
-        let messagebridge_response = self
+        match self
             .client
             .as_ref()
             .unwrap()
-            .delete(&messagebridge_reset_url)
+            .get(&messagebridge_health_url)
             .send()
-            .await;
-        log::info!(
-            "Cleanup: Sent DELETE request to {}, {}",
-            messagebridge_reset_url,
-            messagebridge_response.unwrap().status()
-        );
+            .await
+        {
+            Ok(response) if response.status().is_success() => {
+                let messagebridge_response = self
+                    .client
+                    .as_ref()
+                    .unwrap()
+                    .delete(&messagebridge_reset_url)
+                    .send()
+                    .await;
+                match messagebridge_response {
+                    Ok(response) => log::info!(
+                        "Cleanup: Sent DELETE request to {}, {}",
+                        messagebridge_reset_url,
+                        response.status()
+                    ),
+                    Err(error) => log::warn!(
+                        "Cleanup: Could not reset optional Message Bridge at {}: {}",
+                        messagebridge_reset_url,
+                        error
+                    ),
+                }
+            }
+            Ok(response) => log::warn!(
+                "Cleanup: Optional Message Bridge at {} returned {}",
+                messagebridge_health_url,
+                response.status()
+            ),
+            Err(error) => log::warn!(
+                "Cleanup: Optional Message Bridge at {} is not reachable: {}",
+                messagebridge_health_url,
+                error
+            ),
+        }
 
         let worker_health_url = format!("{}/health", self.message_worker_mock_url);
         let worker_reset_url = format!("{}/processed", self.message_worker_mock_url);
@@ -158,6 +186,9 @@ impl ComposerWorld {
 
         self.last_response = None;
         self.last_status = None;
+        self.last_headers = None;
+        self.first_streamed_chunk = None;
+        self.first_streamed_chunk_elapsed_ms = None;
         self.page_config.clear();
     }
 }
@@ -494,6 +525,66 @@ async fn upstream_monolith_responds(world: &mut ComposerWorld, path: String, ste
     }
 }
 
+#[given(regex = r#"^an upstream monolith streams GET (.+) as (\d+) chunks over (\d+) ms with:$"#)]
+async fn upstream_monolith_streams(
+    world: &mut ComposerWorld,
+    path: String,
+    number_of_chunks: u32,
+    total_duration_ms: u64,
+    step: &GherkinStep,
+) {
+    let body = step
+        .docstring()
+        .expect("Expected docstring for streamed upstream monolith response");
+
+    let payload = serde_json::json!({
+        "request": {
+            "method": "GET",
+            "urlPath": path
+        },
+        "response": {
+            "status": 200,
+            "headers": {
+                "Content-Type": "text/html; charset=utf-8"
+            },
+            "body": body,
+            "chunkedDribbleDelay": {
+                "numberOfChunks": number_of_chunks,
+                "totalDuration": total_duration_ms
+            }
+        }
+    });
+
+    let url = format!("{}/__admin/mappings", world.wiremock_url);
+    let response = world
+        .client
+        .as_ref()
+        .unwrap()
+        .post(&url)
+        .json(&payload)
+        .send()
+        .await;
+
+    match response {
+        Ok(resp) => {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_else(|_| "no body".to_string());
+            assert!(
+                status.is_success(),
+                "Failed to register streamed upstream monolith response. Status: {}, Response: {}",
+                status,
+                body
+            );
+        }
+        Err(e) => {
+            panic!(
+                "Failed to register streamed upstream monolith response at {}. Error: {}",
+                url, e
+            );
+        }
+    }
+}
+
 #[given(regex = r#"^a registered Proxy Page without marker replacements for "([^"]*)"$"#)]
 async fn registered_proxy_page_without_marker_replacements(
     world: &mut ComposerWorld,
@@ -576,6 +667,33 @@ async fn request_page(world: &mut ComposerWorld, path: String) {
     }
 }
 
+#[when(regex = r"^I stream GET (.+) until the first response body chunk$")]
+async fn stream_page_until_first_body_chunk(world: &mut ComposerWorld, path: String) {
+    let url = format!("{}:8080{}", world.base_url, path);
+    log::info!("Streaming page until first body chunk: {}", url);
+
+    let client = world.client.as_ref().expect("HTTP client not initialized");
+    let started_at = Instant::now();
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to start streaming response");
+
+    world.last_status = Some(response.status().as_u16());
+    world.last_headers = Some(response.headers().clone());
+
+    let mut body_stream = response.bytes_stream();
+    let first_chunk = body_stream
+        .next()
+        .await
+        .expect("Expected at least one streamed body chunk")
+        .expect("Failed to read first streamed body chunk");
+
+    world.first_streamed_chunk_elapsed_ms = Some(started_at.elapsed().as_millis());
+    world.first_streamed_chunk = Some(String::from_utf8_lossy(&first_chunk).to_string());
+}
+
 #[then(regex = r"^the response status should be (\d+)$")]
 async fn check_status(world: &mut ComposerWorld, expected_code: u16) {
     let actual = world.last_status.unwrap_or(0);
@@ -595,6 +713,38 @@ async fn check_response_contains(world: &mut ComposerWorld, expected_text: Strin
         "Expected text '{}' not found in response.\n\nActual response:\n{}",
         expected_text,
         response
+    );
+}
+
+#[then(regex = r#"^the first streamed response body chunk should arrive before (\d+) ms$"#)]
+async fn first_streamed_chunk_should_arrive_before(
+    world: &mut ComposerWorld,
+    max_elapsed_ms: u128,
+) {
+    let elapsed_ms = world
+        .first_streamed_chunk_elapsed_ms
+        .expect("No streamed response body chunk was recorded");
+
+    assert!(
+        elapsed_ms < max_elapsed_ms,
+        "Expected first streamed chunk before {} ms, but it arrived after {} ms",
+        max_elapsed_ms,
+        elapsed_ms
+    );
+}
+
+#[then(regex = r#"^the first streamed response body chunk should contain "([^"]*)"$"#)]
+async fn first_streamed_chunk_should_contain(world: &mut ComposerWorld, expected_text: String) {
+    let chunk = world
+        .first_streamed_chunk
+        .as_ref()
+        .expect("No streamed response body chunk was recorded");
+
+    assert!(
+        chunk.contains(&expected_text),
+        "Expected first streamed chunk to contain '{}'.\n\nActual chunk:\n{}",
+        expected_text,
+        chunk
     );
 }
 
