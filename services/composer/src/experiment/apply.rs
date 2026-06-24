@@ -203,6 +203,7 @@ mod tests {
     fn test_page_config(rfa: &str) -> page::PageConfig {
         page::PageConfig {
             path: "/index.html".to_string(),
+            method: "GET".to_string(),
             page_id: "page".to_string(),
             page_type: page::PageType::Rfa,
             template: "template".to_string(),

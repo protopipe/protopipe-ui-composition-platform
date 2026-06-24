@@ -2,11 +2,11 @@ use std::collections::HashMap;
 
 use crate::AppState;
 
-use super::page_config::PageConfig;
+use super::page_config::ComposerRoute;
 
-pub fn resolve_page(state: &AppState, path: &str) -> Option<PageConfig> {
+pub fn resolve_page(state: &AppState, method: &str, path: &str) -> Option<ComposerRoute> {
     let pages = state.pages.lock().unwrap();
-    resolve_page_from_pages(&pages, path)
+    resolve_page_from_pages(&pages, method, path)
 }
 
 pub fn request_target(path: &str, query_string: &str) -> String {
@@ -17,12 +17,16 @@ pub fn request_target(path: &str, query_string: &str) -> String {
     }
 }
 
-fn resolve_page_from_pages(pages: &HashMap<String, PageConfig>, path: &str) -> Option<PageConfig> {
-    if let Some(page) = pages.get(path) {
+fn resolve_page_from_pages(
+    pages: &HashMap<String, ComposerRoute>,
+    method: &str,
+    path: &str,
+) -> Option<ComposerRoute> {
+    if let Some(page) = pages.get(&route_key(method, path)) {
         return Some(page.clone());
     }
 
-    if let Some(page) = resolve_wildcard_page(pages, path) {
+    if let Some(page) = resolve_wildcard_page(pages, method, path) {
         return Some(page);
     }
 
@@ -30,21 +34,31 @@ fn resolve_page_from_pages(pages: &HashMap<String, PageConfig>, path: &str) -> O
         return None;
     };
 
-    if let Some(page) = pages.get(path_without_query) {
+    if let Some(page) = pages.get(&route_key(method, path_without_query)) {
         return Some(page.clone());
     }
 
-    resolve_wildcard_page(pages, path_without_query)
+    resolve_wildcard_page(pages, method, path_without_query)
 }
 
-fn resolve_wildcard_page(pages: &HashMap<String, PageConfig>, path: &str) -> Option<PageConfig> {
+fn resolve_wildcard_page(
+    pages: &HashMap<String, ComposerRoute>,
+    method: &str,
+    path: &str,
+) -> Option<ComposerRoute> {
+    let method = method.to_ascii_uppercase();
     pages
         .iter()
-        .filter(|(pattern, _)| pattern.contains('*') && wildcard_matches(pattern, path))
-        .max_by(|(left, _), (right, _)| {
-            page_pattern_specificity(left).cmp(&page_pattern_specificity(right))
+        .filter(|(_, page)| page.method() == method)
+        .filter(|(_, page)| page.path().contains('*') && wildcard_matches(page.path(), path))
+        .max_by(|(_, left), (_, right)| {
+            page_pattern_specificity(left.path()).cmp(&page_pattern_specificity(right.path()))
         })
         .map(|(_, page)| page.clone())
+}
+
+pub fn route_key(method: &str, path: &str) -> String {
+    format!("{} {}", method.to_ascii_uppercase(), path)
 }
 
 fn page_pattern_specificity(pattern: &str) -> (usize, usize) {
@@ -100,96 +114,108 @@ fn wildcard_matches(pattern: &str, value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::page::PageType;
+    use crate::page::{PageConfig, PageType};
 
     #[test]
     fn resolve_page_matches_generic_path() {
         let pages = HashMap::from([(
-            "/my/shop/*".to_string(),
+            route_key("GET", "/my/shop/*"),
             test_page_config("/my/shop/*", "generic-shop-page"),
         )]);
 
-        let page = resolve_page_from_pages(&pages, "/my/shop/some-category").unwrap();
+        let page = resolved_page_id(
+            resolve_page_from_pages(&pages, "GET", "/my/shop/some-category").unwrap(),
+        );
 
-        assert_eq!(page.page_id, "generic-shop-page");
+        assert_eq!(page, "generic-shop-page");
     }
 
     #[test]
     fn resolve_page_matches_query_parameter_pattern() {
         let pages = HashMap::from([(
-            "/my/shop/search?query=*".to_string(),
+            route_key("GET", "/my/shop/search?query=*"),
             test_page_config("/my/shop/search?query=*", "search-page"),
         )]);
 
-        let page = resolve_page_from_pages(&pages, "/my/shop/search?query=shoes").unwrap();
+        let page = resolved_page_id(
+            resolve_page_from_pages(&pages, "GET", "/my/shop/search?query=shoes").unwrap(),
+        );
 
-        assert_eq!(page.page_id, "search-page");
+        assert_eq!(page, "search-page");
     }
 
     #[test]
     fn resolve_page_without_query_still_matches_request_with_query() {
         let pages = HashMap::from([(
-            "/my/shop/search".to_string(),
+            route_key("GET", "/my/shop/search"),
             test_page_config("/my/shop/search", "search-page"),
         )]);
 
-        let page = resolve_page_from_pages(&pages, "/my/shop/search?query=shoes").unwrap();
+        let page = resolved_page_id(
+            resolve_page_from_pages(&pages, "GET", "/my/shop/search?query=shoes").unwrap(),
+        );
 
-        assert_eq!(page.page_id, "search-page");
+        assert_eq!(page, "search-page");
     }
 
     #[test]
     fn query_parameter_pattern_beats_generic_path_pattern() {
         let pages = HashMap::from([
             (
-                "/my/shop/*".to_string(),
+                route_key("GET", "/my/shop/*"),
                 test_page_config("/my/shop/*", "generic-shop-page"),
             ),
             (
-                "/my/shop/search?query=*".to_string(),
+                route_key("GET", "/my/shop/search?query=*"),
                 test_page_config("/my/shop/search?query=*", "search-page"),
             ),
         ]);
 
-        let page = resolve_page_from_pages(&pages, "/my/shop/search?query=shoes").unwrap();
+        let page = resolved_page_id(
+            resolve_page_from_pages(&pages, "GET", "/my/shop/search?query=shoes").unwrap(),
+        );
 
-        assert_eq!(page.page_id, "search-page");
+        assert_eq!(page, "search-page");
     }
 
     #[test]
     fn resolve_page_prefers_exact_path_over_generic_path() {
         let pages = HashMap::from([
             (
-                "/my/shop/*".to_string(),
+                route_key("GET", "/my/shop/*"),
                 test_page_config("/my/shop/*", "generic-shop-page"),
             ),
             (
-                "/my/shop/cart.fancy".to_string(),
+                route_key("GET", "/my/shop/cart.fancy"),
                 test_page_config("/my/shop/cart.fancy", "cart-page"),
             ),
         ]);
 
-        let page = resolve_page_from_pages(&pages, "/my/shop/cart.fancy").unwrap();
+        let page = resolved_page_id(
+            resolve_page_from_pages(&pages, "GET", "/my/shop/cart.fancy").unwrap(),
+        );
 
-        assert_eq!(page.page_id, "cart-page");
+        assert_eq!(page, "cart-page");
     }
 
     #[test]
     fn resolve_page_prefers_more_specific_generic_path() {
         let pages = HashMap::from([
             (
-                "/my/shop/*".to_string(),
+                route_key("GET", "/my/shop/*"),
                 test_page_config("/my/shop/*", "generic-shop-page"),
             ),
             (
-                "/my/shop/special-*".to_string(),
+                route_key("GET", "/my/shop/special-*"),
                 test_page_config("/my/shop/special-*", "special-shop-page"),
             ),
         ]);
 
-        let page = resolve_page_from_pages(&pages, "/my/shop/special-offers").unwrap();
+        let page = resolved_page_id(
+            resolve_page_from_pages(&pages, "GET", "/my/shop/special-offers").unwrap(),
+        );
 
-        assert_eq!(page.page_id, "special-shop-page");
+        assert_eq!(page, "special-shop-page");
     }
 
     #[test]
@@ -213,9 +239,36 @@ mod tests {
         ));
     }
 
-    fn test_page_config(path: &str, page_id: &str) -> PageConfig {
-        PageConfig {
+    #[test]
+    fn resolve_page_uses_method_as_part_of_route_match() {
+        let pages = HashMap::from([
+            (
+                route_key("GET", "/contact.html"),
+                test_page_config_with_method("/contact.html", "GET", "contact-form"),
+            ),
+            (
+                route_key("POST", "/contact.html"),
+                test_page_config_with_method("/contact.html", "POST", "contact-result"),
+            ),
+        ]);
+
+        let page =
+            resolved_page_id(resolve_page_from_pages(&pages, "POST", "/contact.html").unwrap());
+
+        assert_eq!(page, "contact-result");
+    }
+
+    fn resolved_page_id(route: ComposerRoute) -> String {
+        match route {
+            ComposerRoute::Page(config) => config.page_id,
+            ComposerRoute::Submit(config) => config.page_id,
+        }
+    }
+
+    fn test_page_config(path: &str, page_id: &str) -> ComposerRoute {
+        ComposerRoute::Page(PageConfig {
             path: path.to_string(),
+            method: "GET".to_string(),
             page_id: page_id.to_string(),
             page_type: PageType::Rfa,
             template: "landing".to_string(),
@@ -225,6 +278,16 @@ mod tests {
             content_type: "text/html; charset=utf-8".to_string(),
             data: HashMap::new(),
             interaction: None,
+        })
+    }
+
+    fn test_page_config_with_method(path: &str, method: &str, page_id: &str) -> ComposerRoute {
+        match test_page_config(path, page_id) {
+            ComposerRoute::Page(mut config) => {
+                config.method = method.to_string();
+                ComposerRoute::Page(config)
+            }
+            route => route,
         }
     }
 }

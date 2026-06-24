@@ -7,34 +7,79 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{contextloader, experiment, page, AppState};
 
-pub async fn render_page(state: web::Data<AppState>, req: HttpRequest) -> HttpResponse {
-    render_request(state, req).await
+pub async fn render_page(
+    state: web::Data<AppState>,
+    req: HttpRequest,
+    body: web::Bytes,
+) -> HttpResponse {
+    render_request(state, req, body).await
 }
 
 pub async fn reset_config(state: web::Data<AppState>) {
     state.render_pool.reset_rfas();
 }
 
-async fn render_request(state: web::Data<AppState>, req: HttpRequest) -> HttpResponse {
+async fn render_request(
+    state: web::Data<AppState>,
+    req: HttpRequest,
+    body: web::Bytes,
+) -> HttpResponse {
     let path = req.path();
     log::debug!("Render request: {}", path);
 
-    let resolved_page_config = match resolve_page_config(&state, &req) {
+    let resolved_route_config = match resolve_route_config(&state, &req) {
         Some(resolved) => resolved,
         None => return page_not_found(path),
     };
 
-    match render_resolved_page(&state, &req, resolved_page_config).await {
+    match resolved_route_config {
+        experiment::ResolvedRouteConfig::Page(resolved_page_config) => {
+            render_get_page(&state, &req, resolved_page_config).await
+        }
+        experiment::ResolvedRouteConfig::Submit(resolved_submit_route_config) => {
+            render_post_page(&state, &body, resolved_submit_route_config).await
+        }
+    }
+}
+
+async fn render_get_page(
+    state: &web::Data<AppState>,
+    req: &HttpRequest,
+    resolved_page_config: experiment::ResolvedPageConfig,
+) -> HttpResponse {
+    match render_resolved_page(state, req, resolved_page_config).await {
         Ok(response) => response,
         Err(response) => response,
     }
 }
 
-fn resolve_page_config(
+async fn render_post_page(
+    state: &web::Data<AppState>,
+    body: &[u8],
+    resolved_submit_route_config: experiment::ResolvedSubmitRouteConfig,
+) -> HttpResponse {
+    let submit_route_config = resolved_submit_route_config.submit_route_config;
+    let acknowledgement =
+        contextloader::resolve_submit_service(state, &submit_route_config.post_service, body).await;
+    let location = redirect_location(
+        &submit_route_config.post_service.redirect.path,
+        &acknowledgement,
+    );
+
+    let mut response = HttpResponse::SeeOther();
+    response.append_header(("Location", location));
+    add_assignment_cookie(
+        &mut response,
+        &resolved_submit_route_config.assignment_cookie,
+    );
+    response.finish()
+}
+
+fn resolve_route_config(
     state: &web::Data<AppState>,
     req: &HttpRequest,
-) -> Option<experiment::ResolvedPageConfig> {
-    experiment::resolve_page_config(state, req)
+) -> Option<experiment::ResolvedRouteConfig> {
+    experiment::resolve_route_config(state, req)
 }
 
 async fn render_resolved_page(
@@ -88,7 +133,8 @@ async fn render_rfa(
     page_config: &page::PageConfig,
     resolved_page_config: &experiment::ResolvedPageConfig,
 ) -> Result<String, HttpResponse> {
-    let context = contextloader::build_context(&page_config.data, req);
+    let context = contextloader::build_context(state, &page_config.data, req).await;
+
     state
         .render_pool
         .render(
@@ -109,7 +155,7 @@ async fn render_proxy_page_response(
     markers: &[page::ProxyMarkerReplacement],
 ) -> Result<HttpResponse, HttpResponse> {
     let replacement_tasks =
-        start_marker_replacements(state, req, page_config, resolved_page_config, markers)?;
+        start_marker_replacements(state, req, page_config, resolved_page_config, markers).await?;
 
     let upstream_response = fetch_upstream(origin, req)
         .await
@@ -120,18 +166,18 @@ async fn render_proxy_page_response(
 
     let mut response = HttpResponse::Ok();
     response.content_type(page_config.content_type.clone());
-    add_assignment_cookie(&mut response, resolved_page_config);
+    add_assignment_cookie(&mut response, &resolved_page_config.assignment_cookie);
     Ok(response.streaming(body_stream))
 }
 
-fn start_marker_replacements(
+async fn start_marker_replacements(
     state: &web::Data<AppState>,
     req: &HttpRequest,
     page_config: &page::PageConfig,
     resolved_page_config: &experiment::ResolvedPageConfig,
     markers: &[page::ProxyMarkerReplacement],
 ) -> Result<Vec<ActiveMarkerReplacement>, HttpResponse> {
-    let context = contextloader::build_context(&page_config.data, req);
+    let context = contextloader::build_context(state, &page_config.data, req).await;
     let mut replacements = Vec::new();
 
     for marker in markers {
@@ -371,17 +417,58 @@ fn ok_response(
 ) -> HttpResponse {
     let mut response = HttpResponse::Ok();
     response.content_type(page_config.content_type.clone());
-    add_assignment_cookie(&mut response, resolved_page_config);
+    add_assignment_cookie_from_resolved_page(&mut response, resolved_page_config);
     response.body(rendered)
+}
+
+fn add_assignment_cookie_from_resolved_page(
+    response: &mut actix_web::HttpResponseBuilder,
+    resolved_page_config: &experiment::ResolvedPageConfig,
+) {
+    add_assignment_cookie(response, &resolved_page_config.assignment_cookie);
 }
 
 fn add_assignment_cookie(
     response: &mut actix_web::HttpResponseBuilder,
-    resolved_page_config: &experiment::ResolvedPageConfig,
+    assignment_cookie: &Option<actix_web::cookie::Cookie<'static>>,
 ) {
-    if let Some(cookie) = resolved_page_config.assignment_cookie.clone() {
+    if let Some(cookie) = assignment_cookie.clone() {
         response.cookie(cookie);
     }
+}
+
+fn redirect_location(base_path: &str, acknowledgement: &serde_json::Value) -> String {
+    let query_pairs = ["stream", "businessKey", "partitionKey", "version"]
+        .iter()
+        .filter_map(|field| ack_field(acknowledgement, field).map(|value| (*field, value)))
+        .map(|(field, value)| format!("{}={}", percent_encode(field), percent_encode(&value)))
+        .collect::<Vec<_>>();
+
+    if query_pairs.is_empty() {
+        base_path.to_string()
+    } else {
+        format!("{}?{}", base_path, query_pairs.join("&"))
+    }
+}
+
+fn ack_field(acknowledgement: &serde_json::Value, field: &str) -> Option<String> {
+    acknowledgement.get(field).and_then(|value| match value {
+        serde_json::Value::String(value) => Some(value.clone()),
+        serde_json::Value::Number(value) => Some(value.to_string()),
+        _ => None,
+    })
+}
+
+fn percent_encode(value: &str) -> String {
+    value
+        .bytes()
+        .flat_map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                vec![byte as char]
+            }
+            _ => format!("%{byte:02X}").chars().collect(),
+        })
+        .collect()
 }
 
 fn page_not_found(path: &str) -> HttpResponse {

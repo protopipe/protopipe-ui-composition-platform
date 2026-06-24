@@ -1,30 +1,31 @@
-use crate::DataValue;
 use actix_web::HttpRequest;
 use serde_json::{Map, Value};
-use std::collections::HashMap;
 
-/// Build the renderer context from page data values.
-///
-/// Static values are passed through directly. Dynamic REST values are currently
-/// represented by their default payload until the REST loader is implemented.
-pub fn build_context(data: &HashMap<String, DataValue>, req: &HttpRequest) -> Value {
-    let mut context = Map::new();
-    let query_params = query_params(req.query_string());
+pub struct RequestContext {
+    path: String,
+    query_params: Value,
+}
 
-    for (key, value) in data {
-        let item = match value {
-            DataValue::Static(static_data) => static_data.value.clone(),
-            DataValue::DynamicRest(dynamic) => dynamic.default.clone(),
-            DataValue::Url => Value::String(req.path().to_string()),
-            DataValue::GetParameter(get_parameter) => query_params
-                .get(&get_parameter.key)
-                .cloned()
-                .unwrap_or(Value::Null),
-        };
-        context.insert(key.clone(), item);
+impl RequestContext {
+    pub fn from_request(req: &HttpRequest) -> Self {
+        Self {
+            path: req.path().to_string(),
+            query_params: query_params(req.query_string()),
+        }
     }
 
-    Value::Object(context)
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    pub fn query_value(&self, name: &str) -> Option<String> {
+        match self.query_params.get(name) {
+            Some(Value::String(value)) => Some(value.clone()),
+            Some(Value::Number(value)) => Some(value.to_string()),
+            Some(Value::Bool(value)) => Some(value.to_string()),
+            _ => None,
+        }
+    }
 }
 
 fn query_params(query_string: &str) -> Value {
@@ -99,10 +100,6 @@ fn hex_value(value: u8) -> Option<u8> {
 mod tests {
     use super::*;
 
-    fn test_request(uri: &str) -> HttpRequest {
-        actix_web::test::TestRequest::with_uri(uri).to_http_request()
-    }
-
     #[test]
     fn query_params_returns_single_values_as_strings() {
         let params = query_params("message=Hello&currency=EUR");
@@ -136,64 +133,6 @@ mod tests {
             params,
             serde_json::json!({
                 "message": "Hello World!"
-            })
-        );
-    }
-
-    #[test]
-    fn build_context_injects_declared_url_without_query_string() {
-        let mut data = HashMap::new();
-        data.insert("url".to_string(), DataValue::Url);
-        let request = test_request("/index.html?message=Hello");
-
-        let context = build_context(&data, &request);
-
-        assert_eq!(
-            context,
-            serde_json::json!({
-                "url": "/index.html"
-            })
-        );
-    }
-
-    #[test]
-    fn build_context_injects_declared_get_parameter() {
-        let mut data = HashMap::new();
-        data.insert(
-            "getMessage".to_string(),
-            DataValue::GetParameter(crate::page::GetParameterData {
-                key: "message".to_string(),
-            }),
-        );
-        let request = test_request("/index.html?message=Hello");
-
-        let context = build_context(&data, &request);
-
-        assert_eq!(
-            context,
-            serde_json::json!({
-                "getMessage": "Hello"
-            })
-        );
-    }
-
-    #[test]
-    fn build_context_uses_null_for_missing_get_parameter() {
-        let mut data = HashMap::new();
-        data.insert(
-            "getMessage".to_string(),
-            DataValue::GetParameter(crate::page::GetParameterData {
-                key: "message".to_string(),
-            }),
-        );
-        let request = test_request("/index.html");
-
-        let context = build_context(&data, &request);
-
-        assert_eq!(
-            context,
-            serde_json::json!({
-                "getMessage": null
             })
         );
     }

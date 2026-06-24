@@ -20,12 +20,42 @@ pub struct ResolvedPageConfig {
     pub assignment_cookie: Option<Cookie<'static>>,
 }
 
-pub fn resolve_page_config(
+pub struct ResolvedSubmitRouteConfig {
+    pub submit_route_config: page::SubmitRouteConfig,
+    pub assignment_cookie: Option<Cookie<'static>>,
+}
+
+pub enum ResolvedRouteConfig {
+    Page(ResolvedPageConfig),
+    Submit(ResolvedSubmitRouteConfig),
+}
+
+pub fn resolve_route_config(
     state: &web::Data<AppState>,
     req: &HttpRequest,
-) -> Option<ResolvedPageConfig> {
+) -> Option<ResolvedRouteConfig> {
     let request_target = page::request_target(req.path(), req.query_string());
-    let mut page_config = page::resolve_page(state, &request_target)?;
+    let route_config =
+        page::resolve_route_for_method(state, req.method().as_str(), &request_target)?;
+
+    match route_config {
+        page::ComposerRoute::Page(page_config) => Some(ResolvedRouteConfig::Page(
+            resolve_page_experiments(state, req, page_config),
+        )),
+        page::ComposerRoute::Submit(submit_route_config) => {
+            Some(ResolvedRouteConfig::Submit(ResolvedSubmitRouteConfig {
+                submit_route_config,
+                assignment_cookie: None,
+            }))
+        }
+    }
+}
+
+fn resolve_page_experiments(
+    state: &web::Data<AppState>,
+    req: &HttpRequest,
+    mut page_config: page::PageConfig,
+) -> ResolvedPageConfig {
     let mut rfa_replacements = Vec::new();
     let mut assignment_cookie = None;
 
@@ -61,11 +91,11 @@ pub fn resolve_page_config(
         }
     }
 
-    Some(ResolvedPageConfig {
+    ResolvedPageConfig {
         page_config,
         rfa_replacements,
         assignment_cookie,
-    })
+    }
 }
 
 pub async fn register_experiment(

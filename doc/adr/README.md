@@ -35,6 +35,10 @@ together with the source code.
 - [ADR-0018: Use Internal Brokers and Governed Business Event Sourcing](0018-use-internal-brokers-and-governed-business-event-sourcing.md)
 - [ADR-0019: Use State-Carrying Business Events for Shadow and Experiment Services](0019-use-state-carrying-business-events-for-shadow-and-experiment-services.md)
 - [ADR-0020: Support Proxy Page Markers as Stable and Experimental Composition Points](0020-support-proxy-page-markers-as-stable-and-experimental-composition-points.md)
+- [ADR-0021: Resolve Page REST Service Data Server-Side](0021-resolve-page-rest-service-data-server-side.md)
+- [ADR-0022: Use POST Only for Frontend Submissions](0023-use-post-only-for-frontend-submissions.md)
+- [ADR-0023: Handle Composer POST Requests With 303 Redirects](0024-handle-composer-post-requests-with-303-redirects.md)
+- [ADR-0024: Use Version-Fenced POST Results for Eventual Consistency](0025-use-version-fenced-post-results-for-eventual-consistency.md)
 
 ---
 

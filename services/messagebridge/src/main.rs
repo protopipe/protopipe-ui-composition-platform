@@ -10,7 +10,11 @@ use std::{
     collections::HashMap,
     env,
     sync::{Arc, Mutex},
+    time::Duration,
 };
+
+const AMQP_READY_ATTEMPTS: usize = 240;
+const AMQP_READY_RETRY_DELAY: Duration = Duration::from_millis(500);
 
 #[derive(Clone)]
 struct AppState {
@@ -86,7 +90,7 @@ async fn main() -> std::io::Result<()> {
 async fn connect_channel(amqp_url: &str) -> Result<Channel, String> {
     let mut last_error = None;
 
-    for _ in 0..60 {
+    for _ in 0..AMQP_READY_ATTEMPTS {
         match Connection::connect(amqp_url, ConnectionProperties::default()).await {
             Ok(connection) => match connection.create_channel().await {
                 Ok(channel) => return Ok(channel),
@@ -95,7 +99,7 @@ async fn connect_channel(amqp_url: &str) -> Result<Channel, String> {
             Err(err) => last_error = Some(err.to_string()),
         }
 
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(AMQP_READY_RETRY_DELAY).await;
     }
 
     Err(format!("RabbitMQ did not become ready: {last_error:?}"))

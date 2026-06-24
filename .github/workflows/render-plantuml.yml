@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "main" ]
     paths:
-      - "docs/plantuml/src/*.puml"
+      - "doc/plantuml/src/*.puml"
       - ".github/workflows/render-plantuml.yml"
 
 permissions:
@@ -35,4 +35,3 @@ jobs:
         with:
           commit_message: "chore(docs): render PlantUML diagrams"
           file_pattern: "doc/plantuml/out/*.svg"
-
